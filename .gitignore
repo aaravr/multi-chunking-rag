@@ -1,0 +1,8 @@
+.env
+.venv/
+.venv
+.venv/bin/activate
+.venv/bin/pip3
+__pycache__/
+*.pyc
+data/

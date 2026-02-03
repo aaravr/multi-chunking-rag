@@ -1,0 +1,12 @@
+streamlit
+sqlalchemy
+psycopg2-binary
+pgvector
+transformers==4.57.6
+torch>=2.1.0
+numpy<2
+pymupdf
+azure-ai-documentintelligence
+openai
+streamlit-pdf-viewer
+pillow>=10.0.0,<12
