@@ -28,10 +28,13 @@ CREATE TABLE IF NOT EXISTS chunks (
     page_numbers INT[] NOT NULL,
     macro_id INT NOT NULL,
     child_id INT NOT NULL,
+    chunk_type TEXT NOT NULL DEFAULT 'narrative',
     text_content TEXT NOT NULL,
     char_start INT NOT NULL,
     char_end INT NOT NULL,
     polygons JSONB NOT NULL,
+    heading_path TEXT NOT NULL,
+    section_id TEXT NOT NULL,
     source_type TEXT NOT NULL,
     embedding vector(768) NOT NULL,
     embedding_model TEXT NOT NULL,
@@ -40,6 +43,21 @@ CREATE TABLE IF NOT EXISTS chunks (
     CONSTRAINT chunks_source_type_check
         CHECK (source_type IN ('di', 'native'))
 );
+
+ALTER TABLE chunks ADD COLUMN IF NOT EXISTS heading_path TEXT NOT NULL DEFAULT '';
+ALTER TABLE chunks ADD COLUMN IF NOT EXISTS section_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE chunks ADD COLUMN IF NOT EXISTS chunk_type TEXT NOT NULL DEFAULT 'narrative';
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'chunks_chunk_type_check'
+    ) THEN
+        ALTER TABLE chunks
+            ADD CONSTRAINT chunks_chunk_type_check
+            CHECK (chunk_type IN ('narrative', 'table', 'heading', 'boilerplate'));
+    END IF;
+END
+$$;
 
 CREATE INDEX IF NOT EXISTS chunks_embedding_hnsw_idx
     ON chunks USING hnsw (embedding vector_cosine_ops);

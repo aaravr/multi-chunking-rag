@@ -1,279 +1,274 @@
+SYSTEM (SOVEREIGN CODING AGENT)
 
-1. Purpose
+You are implementing changes to the Sovereign Intelligent Document Processing (IDP) RAG Proof-of-Concept.
 
-This specification defines the non-negotiable behavior, invariants, and interfaces for the Sovereign Intelligent Document Processing (IDP) RAG Proof-of-Concept.
+THIS IS A SPEC-GOVERNED SYSTEM. “This agent must comply with SPEC.md and SPEC_ADDENDUM.md; if they conflict, SPEC.md wins unless SPEC.md is updated.”
 
-The system must demonstrate:
-	•	Accurate extraction from large, complex PDFs (600+ pages)
-	•	Evidence-grounded answers with visual highlights
-	•	Late Chunking for semantic precision
-	•	Selective Azure Document Intelligence (DI) for cost-aware completeness
-	•	A design that can scale conceptually to millions of documents
 
-This document is the single source of truth.
-All code changes must be traceable to this spec.
+SPEC.md is the single source of truth.
+If code behavior and SPEC.md disagree, SPEC.md wins.
 
-⸻
+Your responsibility is not only to implement functionality, but to PROVE via code, tests, and documentation that every SPEC section (1–12) is respected.
 
-2. Goals
+You MUST explicitly check, preserve, and where required test every section below.
 
+────────────────────────────────────────
+SECTION-BY-SECTION NON-NEGOTIABLE RULES
+────────────────────────────────────────
+
+### 1. PURPOSE — MUST CHECK
+The system MUST continue to demonstrate:
+- Accurate extraction from large PDFs (600+ pages)
+- Evidence-grounded answers with visual highlights
+- Late Chunking semantic precision
+- Selective Azure Document Intelligence (DI)
+- Conceptual scalability to millions of documents
+
+Implementation requirements:
+- Do NOT introduce shortcuts that weaken evidence grounding.
+- Do NOT bypass late chunking or lineage for convenience.
+- All changes must be traceable to SPEC.md.
+
+Documentation:
+- Update docs/decisions.md with rationale for every architectural change.
+
+────────────────────────────────────────
+
+### 2. GOALS — MUST CHECK / MUST ADD TESTS
 The system MUST:
-	1.	Ingest PDFs containing mixed content:
-	•	native text
-	•	tables
-	•	images / scanned pages
-	2.	Use policy-based selective DI, not blanket OCR.
-	3.	Preserve full lineage from answer → chunk → page → coordinates.
-	4.	Support attribute extraction and free-form analytical queries.
-	5.	Render clickable evidence highlights on the PDF.
-	6.	Run locally on Mac CPU (PoC environment).
+1) Ingest mixed-content PDFs (text, tables, scanned pages)
+2) Use policy-based selective DI (never blanket OCR)
+3) Preserve full lineage: answer → chunk → page → coordinates
+4) Support both attribute extraction and free-form analytical queries
+5) Render clickable PDF evidence highlights
+6) Run locally on Mac CPU
+
+Required actions:
+- Add or update ingestion tests covering text + table + scanned pages.
+- Add integration test verifying lineage propagation end-to-end.
+- Ensure any new model/component runs on CPU.
+
+────────────────────────────────────────
+
+### 3. NON-GOALS — MUST NOT VIOLATE
+The system MUST NOT:
+- Attempt perfect table cell semantics
+- Perform vision reasoning on charts
+- Add production features (auth, HA, SLA)
+- Replace Azure DI with a pure OSS pipeline
+
+Constraints:
+- Any solution must stay within PoC scope.
+- If functionality touches these areas, STOP and log a design rejection in docs/decisions.md.
+
+────────────────────────────────────────
+
+### 4. ARCHITECTURAL INVARIANTS — MUST NEVER BREAK
+
+#### 4.1 Separation of Concerns
+UI (Streamlit)
+Ingestion
+Extraction
+Canonicalization
+Embedding
+Storage
+Retrieval
+Synthesis
+Grounding
+
+Rules:
+- No layer may bypass another.
+- No cross-layer imports except through defined interfaces.
+
+Tests:
+- Add architectural/lint checks if new cross-layer calls are introduced.
+
+#### 4.2 Deterministic Lineage
+Every chunk MUST contain:
+- doc_id
+- page_number(s)
+- char_start / char_end
+- polygons
+- source_type
+- macro_id / child_id
+- embedding_model / embedding_dim
+- heading_path
+- section_id
+
+Rules:
+- Chunk persistence MUST fail if any field is missing.
+- Lineage metadata MUST be returned by retrieval.
+
+Tests:
+- Add unit tests validating chunk insert invariants.
+
+#### 4.3 Embedding Invariant
+- Model: nomic-ai/modernbert-embed-base
+- Dimension: 768
+- Device: CPU
+- Late chunking = global attention pass → pooling
+
+Rules:
+- No early chunking shortcuts.
+- No alternative embedding models.
+
+Tests:
+- Assert embedding model name and dimension at runtime.
+
+────────────────────────────────────────
+
+### 5. SELECTIVE AZURE DI POLICY — MUST CHECK / MUST ADD TESTS
+
+Rules:
+- DI usage must be defensible, auditable, explainable per page.
+- Page triage MUST compute:
+  - text_length
+  - text_density
+  - image_coverage_ratio
+  - layout_complexity_score
+
+Decision logic:
+- Pages meeting DI criteria MUST go to DI.
+- Others MUST use native extraction.
+
+Auditability:
+- Persist triage_metrics, triage_decision, reason_codes, di_json_path.
+
+DI Disable Mode:
+- When DI disabled, triage_decision stays the same.
+- reason_codes MUST include "di_disabled".
+- di_json_path MUST remain null.
 
-⸻
+Tests:
+- Unit tests for triage metrics.
+- Tests for DI disable behavior.
 
-3. Non-Goals
+────────────────────────────────────────
 
-The system explicitly does NOT aim to:
-	•	Achieve perfect table cell semantics
-	•	Perform full vision reasoning on charts
-	•	Be production hardened (auth, HA, SLA)
-	•	Replace Azure DI with a pure OSS pipeline (out of scope for PoC)
+### 6. LATE CHUNKING SPECIFICATION — MUST CHECK / MUST ADD TESTS
 
-⸻
+Rules:
+- Macro chunks by tokens (default 8192).
+- One ModernBERT forward pass per macro chunk.
+- Child spans via tokenizer offsets (~256 tokens).
+- Pool token embeddings per child span.
 
-4. Architectural Invariants (MUST NEVER BREAK)
+Guarantees:
+- Identical text in different contexts embeds differently.
+- Global context influences local embeddings.
 
-4.1 Separation of Concerns
+Tests:
+- Verify child spans align with char offsets.
+- Verify embeddings differ across contexts.
 
-The following layers MUST remain distinct:
+────────────────────────────────────────
 
-Layer	Responsibility
-UI	Streamlit only
-Ingestion	Page triage, DI orchestration
-Extraction	Native PDF / DI parsing
-Canonicalization	Text + coordinate normalization
-Embedding	Late chunking + vector creation
-Storage	DB schema, persistence
-Retrieval	Vector search
-Synthesis	LLM answer generation
-Grounding	Highlight polygon mapping
+### 7. DATABASE CONTRACT — MUST CHECK / MUST ADD TESTS
 
-No layer may bypass another.
+Tables:
+- documents
+- pages
+- chunks
 
-⸻
+Rules:
+- Schema MUST match SPEC exactly.
+- All required fields MUST be populated.
+- HNSW index on chunks.embedding
+- B-tree index on doc_id
 
-4.2 Deterministic Lineage (First-Class)
+Required chunk fields include:
+- heading_path
+- section_id
 
-Every stored chunk MUST contain:
-	•	doc_id
-	•	page_number(s)
-	•	char_start, char_end
-	•	polygons (bounding boxes or polygons)
-	•	source_type (di or native)
-	•	macro_id, child_id
-	•	embedding_model, embedding_dim
+Tests:
+- Migration tests.
+- Insert/select tests verifying schema completeness.
 
-If any of these are missing, the system is invalid.
+────────────────────────────────────────
 
-⸻
+### 8. RETRIEVAL & ANSWERING — MUST CHECK / MUST ADD TESTS
 
-4.3 Embedding Invariant
-	•	Embedding model: nomic-ai/modernbert-embed-base
-	•	Dimension: 768
-	•	Device: CPU
-	•	Late chunking MUST pool embeddings after a global attention pass.
+Retrieval:
+- Query embedding → retrieval → lineage-rich chunks
+- Default K=3 unless retrieval plan expands scope
 
-No early chunking shortcuts are allowed.
+Rules:
+- Retrieval MUST return lineage metadata.
+- Retrieval logic MUST NOT hallucinate missing evidence.
 
-⸻
+Synthesis:
+- OpenAI API only.
+- LLM must use retrieved content only.
+- Must return answer + citations.
 
-5. Selective Azure DI Policy
+Recommended:
+- Verifier step to confirm claims are supported by cited chunks.
 
-5.1 Principle
+Tests:
+- Retrieval tests returning correct lineage.
+- Synthesis tests rejecting unsupported claims.
 
-DI usage must be:
-	•	Defensible
-	•	Auditable
-	•	Explainable per page
+────────────────────────────────────────
 
-Selective DI is mandatory to control cost at scale.
+### 9. UI REQUIREMENTS — MUST CHECK
 
-⸻
+Rules:
+- Streamlit only.
+- PDF upload + process button.
+- Triage summary visible.
+- Attribute buttons (CET1, Net Income, Risk Exposure).
+- Free-form query input.
 
-5.2 Page Triage Metrics (Computed Locally)
+Grounding:
+- Every citation clickable.
+- Clicking highlights exact polygons on PDF.
 
-For every page:
-	•	text_length
-	•	text_density
-	•	image_coverage_ratio
-	•	layout_complexity_score (heuristic)
+Manual acceptance:
+- Visual highlight MUST be demonstrable.
 
-⸻
+────────────────────────────────────────
 
-5.3 Decision Rules (Example)
+### 10. ACCEPTANCE CRITERIA — MUST PROVE
 
-A page MUST be sent to DI if any of the following are true:
-	•	Very low or no extractable text
-	•	High image coverage (likely scanned)
-	•	High table likelihood / layout complexity
+The system is complete ONLY IF:
+1) 600-page PDF ingests without crashing
+2) Triage decisions are inspectable
+3) Queries return answer + grounded citation
+4) Clicking citation highlights PDF evidence
+5) Lineage invariants preserved end-to-end
 
-Otherwise:
-	•	Native extraction is allowed
+Required:
+- Provide demo steps or integration test script.
 
-⸻
+────────────────────────────────────────
 
-5.4 Triage Auditability
+### 11. CHANGE MANAGEMENT — MUST ENFORCE
 
-For each page, persist:
-	•	triage_metrics (json)
-	•	triage_decision
-	•	reason_codes
-	•	di_json_path (if applicable)
+Rules:
+- Schema change → update SPEC + migration
+- DI policy change → update Section 5
+- Embedding change → update Section 6
+- All decisions logged in docs/decisions.md
 
-This enables post-hoc justification of DI cost.
+Enforcement:
+- PR MUST reference SPEC sections impacted.
 
-5.5 Temporary DI Disable (Testing Only)
+────────────────────────────────────────
 
-DI may be temporarily disabled via configuration for local testing.
-When disabled:
-	•	triage_decision remains unchanged
-	•	reason_codes MUST include "di_disabled"
-	•	di_json_path remains null
+### 12. FINAL AUTHORITY — MUST ACKNOWLEDGE
 
+Rule:
+- If code and SPEC disagree, SPEC wins.
+- Any deviation requires explicit SPEC update.
 
-⸻
+────────────────────────────────────────
 
-6. Late Chunking Specification
+OUTPUT REQUIREMENTS
 
-6.1 Macro Chunking
-	•	Chunk text by tokens
-	•	Target max length: configurable (default 8192)
-	•	Overlap: configurable
+You MUST produce:
+1) Code changes respecting all rules above
+2) Tests covering all “MUST ADD TESTS” sections
+3) Updated documentation
+4) A PR summary explicitly mapping changes to SPEC sections
 
-⸻
-
-6.2 Global Attention Pass
-	•	Run ModernBERT once per macro chunk
-	•	Capture last_hidden_state (token embeddings)
-
-⸻
-
-6.3 Child Chunk Pooling
-	•	Define child spans (sentences or ~256 tokens)
-	•	Use tokenizer offset mappings
-	•	Pool token embeddings within child span
-	•	Mean pooling is acceptable
-
-⸻
-
-6.4 Guarantees
-	•	Identical labels in different contexts must embed differently
-	•	Global context must influence local retrieval units
-
-⸻
-
-7. Database Contract
-
-7.1 Required Tables
-
-documents
-	•	doc_id (uuid)
-	•	filename
-	•	sha256
-	•	page_count
-	•	created_at
-
-pages
-	•	doc_id
-	•	page_number
-	•	triage_metrics
-	•	triage_decision
-	•	reason_codes
-	•	di_json_path
-	•	created_at
-
-chunks
-	•	chunk_id
-	•	doc_id
-	•	page_numbers
-	•	macro_id
-	•	child_id
-	•	text_content
-	•	char_start
-	•	char_end
-	•	polygons
-	•	source_type
-	•	embedding_model
-	•	embedding_dim
-	•	embedding (vector(768))
-	•	created_at
-
-⸻
-
-7.2 Indexing
-	•	HNSW index on chunks.embedding
-	•	B-tree index on doc_id
-
-⸻
-
-8. Retrieval & Answering
-
-8.1 Retrieval
-	•	Embed query
-	•	Retrieve top-K chunks (default K=3)
-	•	Retrieval must return lineage metadata
-
-⸻
-
-8.2 Synthesis
-	•	Use OpenAI API as decoder
-	•	LLM MUST:
-	•	use only retrieved content
-	•	return answer + citations
-	•	never hallucinate unseen facts
-
-⸻
-
-9. UI Requirements
-
-9.1 Features
-	•	PDF upload
-	•	Process button
-	•	Triage summary
-	•	Attribute buttons (CET1 Ratio, Net Income, Risk Exposure)
-	•	Free-form query input
-
-⸻
-
-9.2 Grounding
-	•	Every citation must be clickable
-	•	Clicking highlights exact polygons on the PDF
-	•	Highlighting is mandatory for PoC acceptance
-
-⸻
-
-10. Acceptance Criteria
-
-The system is considered complete only if:
-	1.	A 600-page financial PDF ingests without crashing
-	2.	Triage decisions are stored and inspectable
-	3.	Queries return:
-	•	a concise answer
-	•	at least one grounded citation
-	4.	Clicking a citation highlights evidence on the PDF
-	5.	All lineage invariants are preserved end-to-end
-
-⸻
-
-11. Change Management Rules
-	•	Any schema change → update this spec + migrations
-	•	Any ingestion policy change → update Section 5
-	•	Any embedding change → update Section 6
-	•	All architectural decisions → log in docs/decisions.md
-
-⸻
-
-12. Final Authority
-
-If code behavior and SPEC.md disagree,
-SPEC.md wins.
-
+Failure to respect ANY section invalidates the PR.

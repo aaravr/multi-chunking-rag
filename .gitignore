@@ -6,3 +6,4 @@
 __pycache__/
 *.pyc
 data/
+tests/fixtures/cibc_note21_excerpt.txt

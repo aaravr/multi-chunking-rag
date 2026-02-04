@@ -30,6 +30,9 @@ class CanonicalSpan:
     polygons: List[Dict[str, Any]]
     source_type: str
     page_number: int
+    heading_path: str
+    section_id: str
+    is_table: bool
 
 
 @dataclass(frozen=True)
@@ -45,12 +48,16 @@ class RetrievedChunk:
     chunk_id: str
     doc_id: str
     page_numbers: List[int]
+    macro_id: int
+    chunk_type: str
     text_content: str
     char_start: int
     char_end: int
     polygons: List[Dict[str, Any]]
     source_type: str
     score: float
+    heading_path: str
+    section_id: str
 
 
 @dataclass(frozen=True)
@@ -78,6 +85,7 @@ class ChunkRecord:
     page_numbers: List[int]
     macro_id: int
     child_id: int
+    chunk_type: str
     text_content: str
     char_start: int
     char_end: int
@@ -86,3 +94,5 @@ class ChunkRecord:
     embedding_model: str
     embedding_dim: int
     embedding: List[float]
+    heading_path: str
+    section_id: str

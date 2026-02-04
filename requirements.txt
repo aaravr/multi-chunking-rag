@@ -10,3 +10,6 @@ azure-ai-documentintelligence
 openai
 streamlit-pdf-viewer
 pillow>=10.0.0,<12
+pytest
+rank-bm25
+sentence-transformers

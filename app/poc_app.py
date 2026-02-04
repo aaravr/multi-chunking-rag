@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import time
+import re
 from typing import List
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -13,14 +14,28 @@ from streamlit_pdf_viewer import pdf_viewer
 
 from grounding.highlight import build_annotations, build_annotations_with_index
 from ingestion.ingest_pipeline import ingest_and_chunk
-from retrieval.vector_search import search
+from core.logging import configure_logging
+from storage.schema_contract import check_schema_contract
+from retrieval.router import classify_query, search_with_intent_debug
 from storage.db import get_connection
 from storage import repo
-from synthesis.openai_client import synthesize_answer
+from synthesis.openai_client import (
+    synthesize_answer,
+    synthesize_coverage_answer,
+    synthesize_coverage_attribute,
+)
+from synthesis.verifier import verify_coverage, verify_coverage_attribute
+from core.config import settings
 
 
 st.set_page_config(page_title="IDP RAG PoC", layout="wide")
 st.title("IDP RAG PoC")
+configure_logging()
+try:
+    check_schema_contract()
+except RuntimeError as exc:
+    st.error(str(exc))
+    st.stop()
 
 if "doc_id" not in st.session_state:
     st.session_state.doc_id = None
@@ -42,6 +57,21 @@ if "scroll_to_annotation" not in st.session_state:
     st.session_state.scroll_to_annotation = None
 if "annotation_index_map" not in st.session_state:
     st.session_state.annotation_index_map = {}
+if "upload_name" not in st.session_state:
+    st.session_state.upload_name = None
+if "query_debug" not in st.session_state:
+    st.session_state.query_debug = None
+
+
+def _select_cited_chunk(answer_text: str, chunks: List) -> object:
+    if not answer_text:
+        return chunks[0] if chunks else None
+    indices = re.findall(r"\[C(\d+)\]", answer_text)
+    for idx in indices:
+        pos = int(idx) - 1
+        if 0 <= pos < len(chunks):
+            return chunks[pos]
+    return chunks[0] if chunks else None
 
 
 def _save_upload(uploaded_file) -> str:
@@ -79,6 +109,7 @@ with st.sidebar:
                 st.session_state.pdf_path = cached_path
             else:
                 st.warning("Cached PDF not found. Upload the file to view it.")
+            st.session_state.upload_name = selected.filename
             st.session_state.query_results = []
             st.session_state.annotations = []
 
@@ -86,6 +117,7 @@ with st.sidebar:
     uploaded = st.file_uploader("Upload PDF", type=["pdf"])
     if uploaded:
         st.session_state.pdf_path = _save_upload(uploaded)
+        st.session_state.upload_name = uploaded.name
     process = st.button(
         "Process document",
         disabled=st.session_state.is_processing or not st.session_state.pdf_path,
@@ -142,9 +174,12 @@ with st.sidebar:
                 global_eta_text.write("Global ETA: calculating...")
 
         try:
+            filename = st.session_state.upload_name or os.path.basename(
+                st.session_state.pdf_path
+            )
             st.session_state.doc_id = ingest_and_chunk(
                 st.session_state.pdf_path,
-                filename=uploaded.name,
+                filename=filename,
                 progress_cb=_progress,
                 force_reprocess=force_reprocess,
             )
@@ -179,23 +214,98 @@ with right:
     st.header("Extraction Dashboard")
     preset = st.radio("Preset attributes", ["CET1 Ratio", "Net Income", "Risk Exposure"], index=0)
     query_input = st.text_input("Free-form query", value=preset)
+    st.checkbox("Enable verifier", value=settings.enable_verifier, key="enable_verifier")
+    coverage_mode_options = ["deterministic", "llm_fallback", "llm_always"]
+    default_mode = (
+        settings.coverage_mode
+        if settings.coverage_mode in set(coverage_mode_options)
+        else "llm_fallback"
+    )
+    coverage_mode = st.selectbox(
+        "CoverageQuery mode",
+        coverage_mode_options,
+        index=coverage_mode_options.index(default_mode),
+        key="coverage_mode",
+    )
     run_query = st.button("Run query", disabled=st.session_state.is_processing or not st.session_state.doc_id)
 
     if run_query:
         if not st.session_state.doc_id:
             st.warning("Please process a document first.")
         else:
-            results = search(st.session_state.doc_id, query_input, top_k=3)
+            intent = classify_query(query_input)
+            try:
+                results, debug_info = search_with_intent_debug(
+                    st.session_state.doc_id, query_input, top_k=3
+                )
+            except RuntimeError as exc:
+                st.error(str(exc))
+                st.stop()
             st.session_state.query_results = results
+            st.session_state.query_debug = debug_info
             annotations, index_map = build_annotations_with_index(results)
             st.session_state.annotations = annotations
             st.session_state.annotation_index_map = index_map
+            os.environ["ENABLE_VERIFIER"] = "true" if st.session_state.enable_verifier else "false"
             try:
-                answer = synthesize_answer(query_input, results)
+                if intent.intent == "coverage":
+                    os.environ["COVERAGE_MODE"] = coverage_mode
+                    if intent.coverage_type == "attribute":
+                        answer, mode_used = synthesize_coverage_attribute(
+                            query_input, results
+                        )
+                        if st.session_state.enable_verifier:
+                            verdict, rationale = verify_coverage_attribute(
+                                query_input, answer, results
+                            )
+                            answer = f"{answer}\n\nVerifier: {verdict}\n{rationale}"
+                    else:
+                        answer, mode_used = synthesize_coverage_answer(
+                            query_input,
+                            results,
+                            mode=coverage_mode,
+                            status_filter=intent.status_filter,
+                        )
+                        if st.session_state.enable_verifier:
+                            verdict, rationale = verify_coverage(
+                                query_input, answer, results
+                            )
+                            answer = f"{answer}\n\nVerifier: {verdict}\n{rationale}"
+                else:
+                    answer = synthesize_answer(query_input, results)
             except RuntimeError as exc:
                 answer = f"Synthesis unavailable: {exc}"
             st.subheader("Answer")
             st.write(answer)
+            if intent.intent == "coverage":
+                heading_paths = sorted(
+                    {c.heading_path for c in results if c.heading_path}
+                )
+                section_ids = sorted(
+                    {c.section_id for c in results if c.section_id}
+                )
+                pages = sorted({p for c in results for p in c.page_numbers})
+                page_range = (
+                    f"{pages[0]}-{pages[-1]}" if pages else "unknown"
+                )
+                bbox_preview = "unavailable"
+                cited_chunk = _select_cited_chunk(answer, results)
+                if cited_chunk and cited_chunk.polygons:
+                    bbox_preview = cited_chunk.polygons[0]
+                st.caption(f"Coverage mode used: {mode_used}")
+                st.caption(
+                    "Coverage expansion: "
+                    f"heading_path={heading_paths or ['unknown']}; "
+                    f"section_id={section_ids or ['unknown']}; "
+                    f"page_range={page_range}"
+                )
+                st.caption(
+                    f"Coverage subtype: {'CoverageAttribute' if intent.coverage_type == 'attribute' else 'CoverageList'}"
+                )
+                st.caption(f"Coverage bbox sample: {bbox_preview}")
+            if st.session_state.query_debug is not None:
+                with st.expander("Debug details"):
+                    st.json(st.session_state.query_debug)
 
     if st.session_state.query_results:
         st.subheader("Sources")

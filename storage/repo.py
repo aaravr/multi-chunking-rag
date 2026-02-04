@@ -152,10 +152,13 @@ def insert_chunks(conn, chunks: Iterable[ChunkRecord]) -> None:
             chunk.page_numbers,
             chunk.macro_id,
             chunk.child_id,
+            chunk.chunk_type,
             chunk.text_content,
             chunk.char_start,
             chunk.char_end,
             Json(chunk.polygons),
+            chunk.heading_path,
+            chunk.section_id,
             chunk.source_type,
             chunk.embedding,
             chunk.embedding_model,
@@ -174,16 +177,19 @@ def insert_chunks(conn, chunks: Iterable[ChunkRecord]) -> None:
                 page_numbers,
                 macro_id,
                 child_id,
+                chunk_type,
                 text_content,
                 char_start,
                 char_end,
                 polygons,
+                heading_path,
+                section_id,
                 source_type,
                 embedding,
                 embedding_model,
                 embedding_dim
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             rows,
         )

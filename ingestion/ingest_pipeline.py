@@ -17,6 +17,7 @@ from ingestion.di_client import DIClient
 from ingestion.pdf_analysis import analyze_page
 from storage.db import get_connection
 from storage import repo
+from storage.schema_contract import check_schema_contract
 
 
 def ingest_pdf(
@@ -26,6 +27,7 @@ def ingest_pdf(
     progress_cb=None,
 ) -> str:
     configure_logging()
+    check_schema_contract()
     if not os.path.exists(pdf_path):
         raise FileNotFoundError(pdf_path)
 
@@ -157,9 +159,12 @@ def ingest_and_chunk(
     _cache_source_pdf(doc_id, pdf_path)
     with get_connection() as conn:
         pages = repo.fetch_pages(conn, doc_id)
-    if progress_cb:
-        progress_cb("canonicalize", 0, len(pages))
-    canonical_pages = canonicalize_document(doc_id=doc_id, pdf_path=pdf_path, pages=pages)
+    canonical_pages = canonicalize_document(
+        doc_id=doc_id,
+        pdf_path=pdf_path,
+        pages=pages,
+        progress_cb=progress_cb,
+    )
     if progress_cb:
         progress_cb("embed", 0, len(canonical_pages))
     chunks = late_chunk_embeddings(

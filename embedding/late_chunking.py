@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import uuid
 from typing import List, Tuple
 
@@ -36,6 +37,33 @@ def late_chunk_embeddings(
     processed_macros = 0
 
     for page, macro_chunks in macro_chunks_per_page:
+        for span in page.spans:
+            if not span.is_table:
+                continue
+            tokenized = embedder.tokenize(span.text)
+            token_embeddings = embedder.encode(tokenized)
+            pooled = token_embeddings.mean(dim=0).cpu().numpy().astype(np.float32)
+            chunks.append(
+                ChunkRecord(
+                    chunk_id=str(uuid.uuid4()),
+                    doc_id=page.doc_id,
+                    page_numbers=[span.page_number],
+                    macro_id=macro_id,
+                    child_id=0,
+                    chunk_type="table",
+                    text_content=span.text,
+                    char_start=span.char_start,
+                    char_end=span.char_end,
+                    polygons=span.polygons,
+                    source_type=span.source_type,
+                    embedding_model=settings.embedding_model,
+                    embedding_dim=settings.embedding_dim,
+                    embedding=pooled.tolist(),
+                    heading_path=span.heading_path,
+                    section_id=span.section_id,
+                )
+            )
+            macro_id += 1
         if not macro_chunks:
             continue
         for macro_text, base_offset in macro_chunks:
@@ -62,7 +90,7 @@ def late_chunk_embeddings(
                 pooled = span_embeddings.mean(dim=0).cpu().numpy().astype(np.float32)
                 global_start = base_offset + char_start
                 global_end = base_offset + char_end
-                polygons, page_numbers, source_type = _collect_span_lineage(
+                polygons, page_numbers, source_type, heading_path, section_id = _collect_span_lineage(
                     page.spans, global_start, global_end
                 )
                 chunks.append(
@@ -72,6 +100,7 @@ def late_chunk_embeddings(
                         page_numbers=page_numbers,
                         macro_id=macro_id,
                         child_id=child_id,
+                        chunk_type=_classify_chunk_type(span_text),
                         text_content=span_text,
                         char_start=global_start,
                         char_end=global_end,
@@ -80,6 +109,8 @@ def late_chunk_embeddings(
                         embedding_model=settings.embedding_model,
                         embedding_dim=settings.embedding_dim,
                         embedding=pooled.tolist(),
+                        heading_path=heading_path,
+                        section_id=section_id,
                     )
                 )
                 child_id += 1
@@ -141,10 +172,12 @@ def _build_child_spans(
 
 def _collect_span_lineage(
     spans: List[CanonicalSpan], char_start: int, char_end: int
-) -> Tuple[List[dict], List[int], str]:
+) -> Tuple[List[dict], List[int], str, str, str]:
     polygons: List[dict] = []
     page_numbers: List[int] = []
     source_type = "native"
+    heading_path = ""
+    section_id = ""
     for span in spans:
         overlap = not (span.char_end <= char_start or span.char_start >= char_end)
         if not overlap:
@@ -153,4 +186,40 @@ def _collect_span_lineage(
         if span.page_number not in page_numbers:
             page_numbers.append(span.page_number)
         source_type = span.source_type
-    return polygons, sorted(page_numbers), source_type
+        if not heading_path:
+            heading_path = span.heading_path
+            section_id = span.section_id
+    return polygons, sorted(page_numbers), source_type, heading_path, section_id
+
+
+def _classify_chunk_type(text: str) -> str:
+    cleaned = text.strip()
+    if not cleaned:
+        return "boilerplate"
+    if _looks_like_heading(cleaned):
+        return "heading"
+    if _looks_like_boilerplate(cleaned):
+        return "boilerplate"
+    return "narrative"
+
+
+def _looks_like_heading(text: str) -> bool:
+    if text.isupper() and len(text) <= 80:
+        return True
+    if text.endswith(":") and len(text) <= 80:
+        return True
+    if text.istitle() and len(text) <= 80:
+        return True
+    if re.match(r"^\d+(\.\d+)*\s+\S", text) and len(text) <= 100:
+        return True
+    if re.match(r"^Note\s+\d+", text, re.IGNORECASE):
+        return True
+    return False
+
+
+def _looks_like_boilerplate(text: str) -> bool:
+    if "ANNUAL REPORT" in text.upper() and len(text) <= 120:
+        return True
+    if "CONSOLIDATED FINANCIAL STATEMENTS" in text.upper() and len(text) <= 120:
+        return True
+    return False

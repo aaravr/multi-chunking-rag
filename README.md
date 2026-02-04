@@ -14,3 +14,10 @@ Skeleton project for selective Azure DI + Late Chunking RAG.
 
 If you want a container instead of local Postgres:
 - `docker-compose up -d`
+
+## CoverageQuery Mode
+
+Configure `COVERAGE_MODE` to control CoverageQuery behavior:
+- `deterministic`: only deterministic list extraction
+- `llm_fallback`: deterministic first, then LLM if too few items (default)
+- `llm_always`: always use LLM list extraction on expanded scope
