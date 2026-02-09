@@ -116,9 +116,12 @@ ITEMS_OF_NOTE_AGGREGATE_PHRASES = [
 
 RECONCILIATION_REFERENCE_PHRASES = [
     "for additional information",
+    "for additional information and a reconciliation",
     "are adjusted to exclude",
+    "adjusted to exclude the impact of items of note",
     "see the reconciliation",
     "see reconciliation",
+    "reconciliation of reported results to adjusted",
 ]
 
 RATIO_CONTEXT_TERMS = [
@@ -532,6 +535,7 @@ def _select_items_of_note_anchor(
             reasons.append("reject_chunk_type")
         text = f"{candidate.heading_path} {candidate.section_id} {candidate.text_content}"
         lower = text.lower()
+        impact_hits = _count_financial_impact_mentions(candidate.text_content)
         if not _contains_any_phrase(lower, ITEMS_OF_NOTE_PHRASES):
             reasons.append("missing_positive_phrase")
         if numeric_list:
@@ -543,10 +547,10 @@ def _select_items_of_note_anchor(
             if not _has_items_of_note_reconciliation_signal(lower):
                 reasons.append("missing_reconciliation_signal")
             if _is_reconciliation_reference_only(lower, candidate.text_content):
+                # Reconciliation reference ≠ reconciliation disclosure — reject meta anchors.
                 reasons.append("reject_reconciliation_reference_only")
             if not (
-                _has_enumerated_list(candidate.text_content)
-                or _has_multiple_labeled_numbers(candidate.text_content)
+                impact_hits >= 2
                 or _has_aggregate_impact_phrase(lower)
             ):
                 reasons.append("missing_itemization_or_aggregate")
@@ -564,6 +568,7 @@ def _select_items_of_note_anchor(
                     "chunk_type": candidate.chunk_type,
                     "anchor_method": method,
                     "snippet": text[:120],
+                    "impact_number_hits": impact_hits,
                     "reasons": reasons,
                 }
             )
@@ -574,6 +579,7 @@ def _select_items_of_note_anchor(
                 "chunk_type": candidate.chunk_type,
                 "anchor_method": method,
                 "snippet": text[:120],
+                "impact_number_hits": impact_hits,
                 "reasons": ["accepted"],
             }
         )
@@ -617,11 +623,7 @@ def _has_enumerated_list(text: str) -> bool:
 
 
 def _has_multiple_labeled_numbers(text: str) -> bool:
-    matches = re.findall(
-        r"(?i)([A-Za-z][A-Za-z\s/&\-\(\)]{2,80})\s*(?:\(|:|—|–|-)\s*[^\n]{0,80}?\$?\d",
-        text,
-    )
-    return len(matches) >= 2
+    return _count_financial_impact_mentions(text) >= 2
 
 
 def _has_items_of_note_reconciliation_signal(text: str) -> bool:
@@ -640,12 +642,18 @@ def _has_aggregate_impact_phrase(text: str) -> bool:
     return any(phrase in text for phrase in ITEMS_OF_NOTE_AGGREGATE_PHRASES)
 
 
+def _count_financial_impact_mentions(text: str) -> int:
+    pattern = re.compile(
+        r"(?i)(?:\$|C\$|US\$)\s*[\d,.]+|[\d,.]+\s*(?:million|billion)",
+    )
+    return len(pattern.findall(text))
+
+
 def _is_reconciliation_reference_only(text: str, raw_text: str) -> bool:
     if not any(phrase in text for phrase in RECONCILIATION_REFERENCE_PHRASES):
         return False
     return not (
-        _has_enumerated_list(raw_text)
-        or _has_multiple_labeled_numbers(raw_text)
+        _count_financial_impact_mentions(raw_text) >= 2
         or _has_aggregate_impact_phrase(text)
     )
 

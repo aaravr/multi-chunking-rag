@@ -78,7 +78,7 @@ doc_id, page_numbers	§4.2	chunks table	Insert tests	Complete
 char_start / char_end	§4.2	canonicalization	Offset tests	Complete
 polygons	§4.2	extraction/grounding	UI highlight	Complete
 macro_id / child_id	§4.2	embedding	Unit tests	Complete
-anchor decision debug reasons	§4.2	retrieval/router.py	tests/test_items_of_note_anchor_not_adjusted_measures.py	Complete
+anchor decision debug reasons	§4.2	retrieval/router.py	tests/test_items_of_note_anchor_not_adjusted_measures.py; tests/test_items_of_note_anchor_rejects_reconciliation_reference_only.py	Complete
 
 4.3 Embedding Invariant
 
@@ -127,7 +127,7 @@ Requirement	Spec Ref	Impl	Tests	Status
 Lineage-rich retrieval	§8.1	retrieval/	Retrieval tests	Planned
 Document metadata shortcut	§8.1	retrieval/metadata.py; app/poc_app.py	tests/test_document_facts.py	In-Progress
 LLM constrained to evidence	§8.2	synthesis/prompt	Hallucination test	Planned
-Items-of-note numeric_list anchor hardening	§8.1	retrieval/router.py	tests/test_items_of_note_anchor_not_adjusted_measures.py	Complete
+Items-of-note numeric_list anchor hardening	§8.1	retrieval/router.py	tests/test_items_of_note_anchor_not_adjusted_measures.py; tests/test_items_of_note_anchor_rejects_reconciliation_reference_only.py	Complete
 
 
 ⸻

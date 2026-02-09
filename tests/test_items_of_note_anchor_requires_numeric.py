@@ -23,7 +23,12 @@ def _chunk(chunk_id: str, text: str, page: int) -> RetrievedChunk:
 
 def test_items_of_note_anchor_requires_numeric(monkeypatch):
     front = _chunk("c-front", "Items of note section overview.", 1)
-    later = _chunk("c-later", "Items of note: 1) FDIC special assessment", 5)
+    later = _chunk(
+        "c-later",
+        "Items of note: 1) FDIC special assessment ($0.3 billion after tax) "
+        "2) Acquisition-related intangibles ($0.1 billion after tax)",
+        5,
+    )
 
     monkeypatch.setattr(router.settings, "enable_hybrid_retrieval", True)
     monkeypatch.setattr(
@@ -51,7 +56,8 @@ def test_items_of_note_anchor_rejects_front_matter(monkeypatch):
     )
     later = _chunk(
         "c-later",
-        "Items of note: 1) FDIC special assessment 2) Acquisition-related intangibles",
+        "Items of note: 1) FDIC special assessment ($0.3 billion after tax) "
+        "2) Acquisition-related intangibles ($0.1 billion after tax)",
         6,
     )
 

@@ -30,7 +30,8 @@ def test_items_of_note_anchor_excludes_table(monkeypatch):
     )
     narrative_candidate = _chunk(
         "c-note",
-        "Items of note: 1) FDIC special assessment.",
+        "Items of note: 1) FDIC special assessment ($0.3 billion after tax) "
+        "2) Acquisition-related intangibles ($0.1 billion after tax).",
         "narrative",
     )
     monkeypatch.setattr(
