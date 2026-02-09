@@ -114,6 +114,13 @@ ITEMS_OF_NOTE_AGGREGATE_PHRASES = [
     "aggregate",
 ]
 
+RECONCILIATION_REFERENCE_PHRASES = [
+    "for additional information",
+    "are adjusted to exclude",
+    "see the reconciliation",
+    "see reconciliation",
+]
+
 RATIO_CONTEXT_TERMS = [
     "lcr",
     "ratio",
@@ -535,6 +542,8 @@ def _select_items_of_note_anchor(
                 reasons.append("reject_adjusted_measures_definition")
             if not _has_items_of_note_reconciliation_signal(lower):
                 reasons.append("missing_reconciliation_signal")
+            if _is_reconciliation_reference_only(lower, candidate.text_content):
+                reasons.append("reject_reconciliation_reference_only")
             if not (
                 _has_enumerated_list(candidate.text_content)
                 or _has_multiple_labeled_numbers(candidate.text_content)
@@ -629,6 +638,16 @@ def _has_items_of_note_reconciliation_signal(text: str) -> bool:
 
 def _has_aggregate_impact_phrase(text: str) -> bool:
     return any(phrase in text for phrase in ITEMS_OF_NOTE_AGGREGATE_PHRASES)
+
+
+def _is_reconciliation_reference_only(text: str, raw_text: str) -> bool:
+    if not any(phrase in text for phrase in RECONCILIATION_REFERENCE_PHRASES):
+        return False
+    return not (
+        _has_enumerated_list(raw_text)
+        or _has_multiple_labeled_numbers(raw_text)
+        or _has_aggregate_impact_phrase(text)
+    )
 
 
 def _is_adjusted_measures_definition(text: str) -> bool:

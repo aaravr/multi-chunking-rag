@@ -75,3 +75,43 @@ def test_items_of_note_anchor_not_adjusted_measures(monkeypatch):
     ]
     assert lcr_rejected
     assert front_rejected
+
+
+def test_items_of_note_anchor_rejects_reconciliation_reference_only(monkeypatch):
+    query = "List the items of note affecting 2024 net income and the aggregate impact"
+    bad_reference = _chunk(
+        "c-ref",
+        "Adjusted measures are adjusted to exclude the impact of items of note. "
+        "For additional information, see the reconciliation.",
+        "MD&A/Adjusted measures",
+    )
+    good = _chunk(
+        "c-mdna",
+        "Items of note: 1) FDIC special assessment ($123) 2) Acquisition-related intangibles ($45). "
+        "Aggregate impact ($168).",
+        "MD&A/Items of note",
+    )
+
+    monkeypatch.setattr(router.settings, "enable_hybrid_retrieval", True)
+    monkeypatch.setattr(
+        router,
+        "bm25_heading_anchor_candidates",
+        lambda *args, **kwargs: [bad_reference, good],
+    )
+    monkeypatch.setattr(
+        router,
+        "_expand_from_anchor",
+        lambda *_args, **_kwargs: ([good], {"method": "section"}),
+    )
+    results, debug = router.search_with_intent_debug("doc", query, top_k=3)
+    assert results
+    assert debug["anchor"]["chunk_id"] == "c-mdna"
+
+    decisions = debug["anchor_decisions"]
+    reference_rejected = [
+        item
+        for item in decisions
+        if item["chunk_id"] == "c-ref"
+        and "reject_reconciliation_reference_only" in item["reasons"]
+    ]
+    assert reference_rejected
