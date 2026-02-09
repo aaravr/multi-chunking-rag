@@ -1,7 +1,8 @@
+import os
+
 from core.contracts import RetrievedChunk
 from retrieval import router
 from synthesis import openai_client
-from synthesis.verifier import verify_coverage_attribute
 
 
 class DummyResponse:
@@ -25,9 +26,7 @@ class DummyClient:
         class completions:
             @staticmethod
             def create(*_args, **_kwargs):
-                return DummyResponse(
-                    "Answer: nil to approximately $0.7 billion [C1]"
-                )
+                return DummyResponse("See Note 21 [C1]")
 
 
 def _chunk(text: str) -> RetrievedChunk:
@@ -44,29 +43,19 @@ def _chunk(text: str) -> RetrievedChunk:
         polygons=[],
         source_type="native",
         score=0.0,
-        heading_path="Notes > Note 21 > Litigation",
-        section_id="note-21-litigation",
+        heading_path="Notes/Note 21/Significant legal proceedings",
+        section_id="note-21",
     )
 
 
-def test_coverage_attribute_query_flow(monkeypatch):
-    query = "What is the aggregate range of reasonably possible losses..."
+def test_pointer_query_note_reference(monkeypatch):
+    query = "Where can I find the discussion of significant legal proceedings?"
     intent = router.classify_query(query)
     assert intent.intent == "coverage"
-    assert intent.coverage_type == "attribute"
+    assert intent.coverage_type == "pointer"
 
     monkeypatch.setattr(openai_client, "OpenAI", DummyClient)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    chunks = [
-        _chunk(
-            "Reasonably possible losses range from nil to approximately $0.7 billion."
-        )
-    ]
-    answer, mode_used = openai_client.synthesize_coverage_attribute(
-        query, chunks
-    )
-    assert mode_used == "llm"
-    assert "nil to approximately $0.7 billion" in answer
-
-    verdict, _ = verify_coverage_attribute(query, answer, chunks)
-    assert verdict == "YES"
+    os.environ["ENABLE_VERIFIER"] = "false"
+    answer = openai_client.synthesize_answer(query, [_chunk("See Note 21")])
+    assert "Note 21" in answer

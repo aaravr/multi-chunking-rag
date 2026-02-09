@@ -20,6 +20,7 @@ def _chunk(
         doc_id="doc-1",
         page_numbers=pages,
         macro_id=macro_id,
+        child_id=0,
         chunk_type=chunk_type,
         text_content=text,
         char_start=0,
@@ -69,6 +70,7 @@ def test_coverage_section_expansion(monkeypatch):
     ]
 
     monkeypatch.setattr(router.settings, "enable_hybrid_retrieval", False)
+    monkeypatch.setattr(router, "bm25_heading_anchor", lambda *args, **kwargs: None)
     monkeypatch.setattr(vector_search, "search", lambda *args, **kwargs: anchor)
     monkeypatch.setattr(vector_search, "fetch_by_section", lambda *args, **kwargs: expanded)
 
@@ -85,13 +87,17 @@ def test_coverage_page_window_fallback(monkeypatch):
     ]
 
     monkeypatch.setattr(router.settings, "enable_hybrid_retrieval", False)
+    monkeypatch.setattr(router, "bm25_heading_anchor", lambda *args, **kwargs: None)
     monkeypatch.setattr(vector_search, "search", lambda *args, **kwargs: anchor)
     monkeypatch.setattr(vector_search, "fetch_by_section", lambda *args, **kwargs: [])
+    monkeypatch.setattr(vector_search, "fetch_by_macro_id", lambda *args, **kwargs: [])
     monkeypatch.setattr(vector_search, "fetch_by_page_window", lambda *args, **kwargs: fallback)
 
-    results = router.search_with_intent("doc-1", "list me all litigation events")
-    assert len(results) == 2
-    assert results[0].page_numbers == [49]
+    try:
+        router.search_with_intent("doc-1", "list me all litigation events")
+        assert False, "Expected CoverageListQuery expansion error"
+    except RuntimeError as exc:
+        assert "CoverageListQuery expansion returned no chunks" in str(exc)
 
 
 def test_coverage_list_extraction_fixture():

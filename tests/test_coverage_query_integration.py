@@ -19,6 +19,7 @@ def _chunk(
         doc_id="cibc-2024",
         page_numbers=pages,
         macro_id=macro_id,
+        child_id=0,
         chunk_type=chunk_type,
         text_content=text,
         char_start=0,
@@ -44,6 +45,7 @@ def test_coverage_query_integration_fixture(monkeypatch):
     ]
 
     monkeypatch.setattr(router.settings, "enable_hybrid_retrieval", False)
+    monkeypatch.setattr(router, "bm25_heading_anchor", lambda *args, **kwargs: None)
     monkeypatch.setattr(vector_search, "search", lambda *args, **kwargs: anchor)
     monkeypatch.setattr(vector_search, "fetch_by_section", lambda *args, **kwargs: expanded)
 

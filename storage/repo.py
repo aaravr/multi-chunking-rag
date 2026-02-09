@@ -3,7 +3,7 @@ from typing import Iterable, List, Optional
 from psycopg2.extras import Json
 from pgvector.psycopg2 import register_vector
 
-from core.contracts import ChunkRecord, DocumentRecord, PageRecord, TriageMetrics
+from core.contracts import ChunkRecord, DocumentFact, DocumentRecord, PageRecord, TriageMetrics
 
 
 def insert_document(conn, document: DocumentRecord) -> None:
@@ -193,3 +193,75 @@ def insert_chunks(conn, chunks: Iterable[ChunkRecord]) -> None:
             """,
             rows,
         )
+
+
+def upsert_document_facts(conn, facts: Iterable[DocumentFact]) -> None:
+    rows = [
+        (
+            fact.doc_id,
+            fact.fact_name,
+            fact.value,
+            fact.status,
+            fact.confidence,
+            fact.source_chunk_id,
+            fact.page_numbers,
+            Json(fact.polygons),
+            fact.evidence_excerpt,
+        )
+        for fact in facts
+    ]
+    if not rows:
+        return
+    with conn.cursor() as cursor:
+        cursor.executemany(
+            """
+            INSERT INTO document_facts (
+                doc_id,
+                fact_name,
+                value,
+                status,
+                confidence,
+                source_chunk_id,
+                page_numbers,
+                polygons,
+                evidence_excerpt
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (doc_id, fact_name) DO UPDATE
+            SET value = EXCLUDED.value,
+                status = EXCLUDED.status,
+                confidence = EXCLUDED.confidence,
+                source_chunk_id = EXCLUDED.source_chunk_id,
+                page_numbers = EXCLUDED.page_numbers,
+                polygons = EXCLUDED.polygons,
+                evidence_excerpt = EXCLUDED.evidence_excerpt
+            """,
+            rows,
+        )
+
+
+def fetch_document_fact(conn, doc_id: str, fact_name: str) -> Optional[DocumentFact]:
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT doc_id, fact_name, value, status, confidence, source_chunk_id,
+                   page_numbers, polygons, evidence_excerpt
+            FROM document_facts
+            WHERE doc_id = %s AND fact_name = %s
+            """,
+            (doc_id, fact_name),
+        )
+        row = cursor.fetchone()
+    if not row:
+        return None
+    return DocumentFact(
+        doc_id=str(row[0]),
+        fact_name=row[1],
+        value=row[2],
+        status=row[3],
+        confidence=float(row[4] or 0.0),
+        source_chunk_id=str(row[5]) if row[5] else None,
+        page_numbers=list(row[6] or []),
+        polygons=list(row[7] or []),
+        evidence_excerpt=row[8],
+    )

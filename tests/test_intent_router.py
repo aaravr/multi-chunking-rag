@@ -1,3 +1,4 @@
+from core.contracts import RetrievedChunk
 from retrieval import router
 
 
@@ -42,17 +43,38 @@ def test_location_query_routes_to_page_filter(monkeypatch):
 def test_coverage_query_expands_section(monkeypatch):
     def _search(doc_id, query, top_k=1):
         class Dummy:
+            chunk_id = "c1"
             heading_path = "doc/Section A"
             section_id = "Section A"
             chunk_type = "heading"
             page_numbers = [1]
             macro_id = 0
+            child_id = 0
         return [Dummy()]
 
     def _fetch_by_section(doc_id, heading_path, section_id):
-        return ["expanded"]
+        return [
+            RetrievedChunk(
+                chunk_id="c1",
+                doc_id=doc_id,
+                page_numbers=[1],
+                macro_id=0,
+                child_id=0,
+                chunk_type="narrative",
+                text_content="Expanded content",
+                char_start=0,
+                char_end=10,
+                polygons=[],
+                source_type="native",
+                score=0.0,
+                heading_path=heading_path,
+                section_id=section_id,
+            )
+        ]
 
     monkeypatch.setattr(router.vector_search, "search", _search)
     monkeypatch.setattr(router.vector_search, "fetch_by_section", _fetch_by_section)
+    monkeypatch.setattr(router, "bm25_heading_anchor", lambda *args, **kwargs: None)
     results = router.search_with_intent("doc-1", "list all significant events", top_k=3)
-    assert results == ["expanded"]
+    assert len(results) == 1
+    assert results[0].text_content == "Expanded content"

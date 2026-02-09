@@ -14,6 +14,7 @@ from embedding.late_chunking import late_chunk_embeddings
 from ingestion.canonicalize import canonicalize_document
 from core.logging import configure_logging
 from ingestion.di_client import DIClient
+from ingestion.document_facts import extract_document_facts
 from ingestion.pdf_analysis import analyze_page
 from storage.db import get_connection
 from storage import repo
@@ -177,6 +178,9 @@ def ingest_and_chunk(
     if chunks:
         with get_connection() as conn:
             repo.insert_chunks(conn, chunks)
+            if settings.enable_document_facts:
+                facts = extract_document_facts(doc_id, chunks)
+                repo.upsert_document_facts(conn, facts)
             conn.commit()
     return doc_id
 

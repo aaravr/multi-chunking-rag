@@ -245,13 +245,21 @@ Required:
 ### 11. CHANGE MANAGEMENT — MUST ENFORCE
 
 Rules:
-- Schema change → update SPEC + migration
-- DI policy change → update Section 5
-- Embedding change → update Section 6
-- All decisions logged in docs/decisions.md
+- Schema contract change (tables/columns/constraints/indexes) → add migration + update SPEC if the contract/invariants change + update docs/traceability.md
+- DI policy change → update Section 5 + update docs/traceability.md
+- Embedding change → update Section 6 + update docs/traceability.md
+- All architectural decisions → log in docs/decisions.md
 
 Enforcement:
 - PR MUST reference SPEC sections impacted.
+- PR MUST include migrations/tests where applicable.
+
+Agent Governance (Mandatory):
+- All changes must be executed under docs/agents/SOVEREIGN_CODING_AGENT_SYSTEM.md
+- Non-trivial change requests must be captured as work orders under docs/agents/WORK_ORDERS/
+- Knowledge hardening rules must be followed (hardening.md)
+
+If governance docs conflict with SPEC.md, SPEC.md wins unless SPEC.md is explicitly updated.
 
 ────────────────────────────────────────
 

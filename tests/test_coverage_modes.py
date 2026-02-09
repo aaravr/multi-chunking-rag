@@ -32,6 +32,7 @@ def _chunk(chunk_id: str, text: str) -> RetrievedChunk:
         doc_id="doc",
         page_numbers=[1],
         macro_id=0,
+        child_id=0,
         chunk_type="narrative",
         text_content=text,
         char_start=0,

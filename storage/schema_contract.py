@@ -35,6 +35,18 @@ REQUIRED_SCHEMA: Dict[str, List[str]] = {
         "page_count",
         "created_at",
     ],
+    "document_facts": [
+        "doc_id",
+        "fact_name",
+        "value",
+        "status",
+        "confidence",
+        "source_chunk_id",
+        "page_numbers",
+        "polygons",
+        "evidence_excerpt",
+        "created_at",
+    ],
 }
 
 

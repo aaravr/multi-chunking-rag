@@ -23,6 +23,7 @@ def search(
                        doc_id,
                        page_numbers,
                        macro_id,
+                       child_id,
                        chunk_type,
                        text_content,
                        char_start,
@@ -48,15 +49,16 @@ def search(
                 doc_id=str(row[1]),
                 page_numbers=list(row[2] or []),
                 macro_id=int(row[3] or 0),
-                chunk_type=row[4] or "narrative",
-                text_content=row[5],
-                char_start=int(row[6]),
-                char_end=int(row[7]),
-                polygons=list(row[8] or []),
-                source_type=row[9],
-                heading_path=row[10],
-                section_id=row[11],
-                score=float(row[12]),
+                child_id=int(row[4] or 0),
+                chunk_type=row[5] or "narrative",
+                text_content=row[6],
+                char_start=int(row[7]),
+                char_end=int(row[8]),
+                polygons=list(row[9] or []),
+                source_type=row[10],
+                heading_path=row[11],
+                section_id=row[12],
+                score=float(row[13]),
             )
         )
     return results
@@ -81,6 +83,7 @@ def search_on_pages(
                        doc_id,
                        page_numbers,
                        macro_id,
+                       child_id,
                        chunk_type,
                        text_content,
                        char_start,
@@ -117,6 +120,7 @@ def fetch_by_section(
                        doc_id,
                        page_numbers,
                        macro_id,
+                       child_id,
                        chunk_type,
                        text_content,
                        char_start,
@@ -129,7 +133,7 @@ def fetch_by_section(
                 FROM chunks
                 WHERE doc_id = %s
                   AND (heading_path = %s OR section_id = %s)
-                ORDER BY page_numbers[1] NULLS LAST, char_start
+                ORDER BY page_numbers[1] NULLS LAST, macro_id, child_id, char_start
                 """,
                 (doc_id, heading_path, section_id),
             )
@@ -153,6 +157,7 @@ def fetch_by_page_window(
                        doc_id,
                        page_numbers,
                        macro_id,
+                       child_id,
                        chunk_type,
                        text_content,
                        char_start,
@@ -165,7 +170,7 @@ def fetch_by_page_window(
                 FROM chunks
                 WHERE doc_id = %s
                   AND page_numbers && %s
-                ORDER BY page_numbers[1] NULLS LAST, char_start
+                ORDER BY page_numbers[1] NULLS LAST, macro_id, child_id, char_start
                 """,
                 (doc_id, pages),
             )
@@ -182,6 +187,7 @@ def fetch_by_macro_id(doc_id: str, macro_id: int) -> List[RetrievedChunk]:
                        doc_id,
                        page_numbers,
                        macro_id,
+                       child_id,
                        chunk_type,
                        text_content,
                        char_start,
@@ -194,7 +200,7 @@ def fetch_by_macro_id(doc_id: str, macro_id: int) -> List[RetrievedChunk]:
                 FROM chunks
                 WHERE doc_id = %s
                   AND macro_id = %s
-                ORDER BY page_numbers[1] NULLS LAST, char_start
+                ORDER BY page_numbers[1] NULLS LAST, macro_id, child_id, char_start
                 """,
                 (doc_id, macro_id),
             )
@@ -211,15 +217,16 @@ def _rows_to_chunks(rows) -> List[RetrievedChunk]:
                 doc_id=str(row[1]),
                 page_numbers=list(row[2] or []),
                 macro_id=int(row[3] or 0),
-                chunk_type=row[4] or "narrative",
-                text_content=row[5],
-                char_start=int(row[6]),
-                char_end=int(row[7]),
-                polygons=list(row[8] or []),
-                source_type=row[9],
-                heading_path=row[10],
-                section_id=row[11],
-                score=float(row[12]),
+                child_id=int(row[4] or 0),
+                chunk_type=row[5] or "narrative",
+                text_content=row[6],
+                char_start=int(row[7]),
+                char_end=int(row[8]),
+                polygons=list(row[9] or []),
+                source_type=row[10],
+                heading_path=row[11],
+                section_id=row[12],
+                score=float(row[13]),
             )
         )
     return results

@@ -78,6 +78,7 @@ doc_id, page_numbers	§4.2	chunks table	Insert tests	Complete
 char_start / char_end	§4.2	canonicalization	Offset tests	Complete
 polygons	§4.2	extraction/grounding	UI highlight	Complete
 macro_id / child_id	§4.2	embedding	Unit tests	Complete
+anchor decision debug reasons	§4.2	retrieval/router.py	tests/test_items_of_note_anchor_not_adjusted_measures.py	Complete
 
 4.3 Embedding Invariant
 
@@ -113,7 +114,8 @@ Context-sensitive embeddings	§6.4	embedding	Context diff test	Planned
 7. Database Contract (SPEC §7)
 
 Requirement	Spec Ref	Impl	Tests	Status
-documents/pages/chunks tables	§7.1	storage/schema.sql; storage/migrations/001_add_chunk_type.sql; storage/schema_contract.py	tests/test_schema_contract.py; tests/test_ingestion_smoke.py	In-Progress
+documents/pages/chunks tables	§7.1	storage/schema.sql; storage/migrations/001_add_chunk_type.sql; storage/schema_contract.py	tests/test_migrations_and_contract.py; tests/test_ingestion_smoke.py	In-Progress
+document_facts table	§7.1	storage/schema.sql; storage/migrations/002_document_facts.sql; storage/schema_contract.py	tests/test_document_facts.py	In-Progress
 HNSW + B-tree indexes	§7.2	migrations	Index existence	Planned
 
 
@@ -123,7 +125,9 @@ HNSW + B-tree indexes	§7.2	migrations	Index existence	Planned
 
 Requirement	Spec Ref	Impl	Tests	Status
 Lineage-rich retrieval	§8.1	retrieval/	Retrieval tests	Planned
+Document metadata shortcut	§8.1	retrieval/metadata.py; app/poc_app.py	tests/test_document_facts.py	In-Progress
 LLM constrained to evidence	§8.2	synthesis/prompt	Hallucination test	Planned
+Items-of-note numeric_list anchor hardening	§8.1	retrieval/router.py	tests/test_items_of_note_anchor_not_adjusted_measures.py	Complete
 
 
 ⸻
@@ -171,14 +175,16 @@ SPEC wins on conflict	PR review gate	Enforced
 SPEC ADDENDUM TRACEABILITY
 
 Addendum Requirement	Addendum Ref	Impl	Tests	Status
-Query intent routing (location/coverage/semantic)	A1	retrieval/router.py; synthesis/openai_client.py; app/poc_app.py (coverage mode)	tests/test_coverage_query.py; tests/test_coverage_modes.py	Complete
+Query intent routing + subtypes (list/attribute/numeric_list/pointer)	A1	retrieval/router.py; synthesis/openai_client.py; app/poc_app.py	tests/test_coverage_query.py; tests/test_router_intent_subtypes.py; tests/test_pointer_query_note_reference.py; tests/test_coverage_attribute_range_losses.py	Complete
 Page-filtered retrieval	A1	retrieval/vector_search.py	Page query test	Complete
-Section expansion	A1	retrieval/vector_search.py	tests/test_coverage_query_integration.py	Complete
+Section expansion (Locate → Then Read)	A1	retrieval/router.py; retrieval/vector_search.py	tests/test_closed_matters_plan.py; tests/test_coverage_query_integration.py	Complete
 heading_path persistence	A2	canonicalization	tests/test_coverage_query_integration.py	Complete
-Atomic table chunks	A3	ingestion/canonicalize.py	Table integrity test	Complete
+Atomic table chunks	A3	ingestion/canonicalize.py; embedding/late_chunking.py	tests/test_table_atomicity.py	Complete
+Table-aware filtering for MD&A	A3	retrieval/router.py	tests/test_table_filtering_policy.py; tests/test_items_of_note_anchor_never_table.py	Complete
 Hybrid retrieval (RRF)	A4	retrieval/hybrid.py	Fusion test	Complete
 Verifier (Yes/No)	A4	synthesis/verifier.py	Support test	Complete
 Cross-encoder reranker	A4	retrieval/rerank.py	Rerank tests	Complete
+Document-level fact caching	A6	ingestion/document_facts.py; retrieval/metadata.py; storage/schema.sql	tests/test_document_facts.py	In-Progress
 
 
 ⸻

@@ -16,6 +16,7 @@ from grounding.highlight import build_annotations, build_annotations_with_index
 from ingestion.ingest_pipeline import ingest_and_chunk
 from core.logging import configure_logging
 from storage.schema_contract import check_schema_contract
+from retrieval.metadata import detect_fact_name, handle_metadata_query
 from retrieval.router import classify_query, search_with_intent_debug
 from storage.db import get_connection
 from storage import repo
@@ -233,79 +234,116 @@ with right:
         if not st.session_state.doc_id:
             st.warning("Please process a document first.")
         else:
-            intent = classify_query(query_input)
-            try:
-                results, debug_info = search_with_intent_debug(
-                    st.session_state.doc_id, query_input, top_k=3
+            metadata_fact = detect_fact_name(query_input)
+            if metadata_fact:
+                answer, results, debug_info = handle_metadata_query(
+                    st.session_state.doc_id,
+                    query_input,
+                    use_cache=settings.enable_document_facts,
                 )
-            except RuntimeError as exc:
-                st.error(str(exc))
-                st.stop()
-            st.session_state.query_results = results
-            st.session_state.query_debug = debug_info
-            annotations, index_map = build_annotations_with_index(results)
-            st.session_state.annotations = annotations
-            st.session_state.annotation_index_map = index_map
-            os.environ["ENABLE_VERIFIER"] = "true" if st.session_state.enable_verifier else "false"
-            try:
-                if intent.intent == "coverage":
-                    os.environ["COVERAGE_MODE"] = coverage_mode
-                    if intent.coverage_type == "attribute":
-                        answer, mode_used = synthesize_coverage_attribute(
-                            query_input, results
-                        )
-                        if st.session_state.enable_verifier:
-                            verdict, rationale = verify_coverage_attribute(
-                                query_input, answer, results
+                st.session_state.query_results = results
+                st.session_state.query_debug = debug_info
+                annotations, index_map = build_annotations_with_index(results)
+                st.session_state.annotations = annotations
+                st.session_state.annotation_index_map = index_map
+                st.subheader("Answer")
+                st.write(answer)
+                if st.session_state.query_debug is not None:
+                    with st.expander("Debug details"):
+                        st.json(st.session_state.query_debug)
+            else:
+                intent = classify_query(query_input)
+                try:
+                    results, debug_info = search_with_intent_debug(
+                        st.session_state.doc_id, query_input, top_k=3
+                    )
+                except RuntimeError as exc:
+                    st.error(str(exc))
+                    st.stop()
+                st.session_state.query_results = results
+                st.session_state.query_debug = debug_info
+                annotations, index_map = build_annotations_with_index(results)
+                st.session_state.annotations = annotations
+                st.session_state.annotation_index_map = index_map
+                os.environ["ENABLE_VERIFIER"] = "true" if st.session_state.enable_verifier else "false"
+                try:
+                    if intent.intent == "coverage":
+                        os.environ["COVERAGE_MODE"] = coverage_mode
+                        if intent.coverage_type == "attribute":
+                            answer, mode_used = synthesize_coverage_attribute(
+                                query_input, results
                             )
-                            answer = f"{answer}\n\nVerifier: {verdict}\n{rationale}"
+                            if st.session_state.enable_verifier:
+                                verdict, rationale = verify_coverage_attribute(
+                                    query_input, answer, results
+                                )
+                                answer = f"{answer}\n\nVerifier: {verdict}\n{rationale}"
+                        elif intent.coverage_type == "pointer":
+                            answer = synthesize_answer(query_input, results)
+                            mode_used = "llm"
+                        elif intent.coverage_type == "numeric_list":
+                            answer, mode_used = synthesize_coverage_answer(
+                                query_input,
+                                results,
+                                mode="llm_always",
+                                status_filter=intent.status_filter,
+                            )
+                            if st.session_state.enable_verifier:
+                                verdict, rationale = verify_coverage(
+                                    query_input, answer, results
+                                )
+                                answer = f"{answer}\n\nVerifier: {verdict}\n{rationale}"
+                        else:
+                            answer, mode_used = synthesize_coverage_answer(
+                                query_input,
+                                results,
+                                mode=coverage_mode,
+                                status_filter=intent.status_filter,
+                            )
+                            if st.session_state.enable_verifier:
+                                verdict, rationale = verify_coverage(
+                                    query_input, answer, results
+                                )
+                                answer = f"{answer}\n\nVerifier: {verdict}\n{rationale}"
                     else:
-                        answer, mode_used = synthesize_coverage_answer(
-                            query_input,
-                            results,
-                            mode=coverage_mode,
-                            status_filter=intent.status_filter,
-                        )
-                        if st.session_state.enable_verifier:
-                            verdict, rationale = verify_coverage(
-                                query_input, answer, results
-                            )
-                            answer = f"{answer}\n\nVerifier: {verdict}\n{rationale}"
-                else:
-                    answer = synthesize_answer(query_input, results)
-            except RuntimeError as exc:
-                answer = f"Synthesis unavailable: {exc}"
-            st.subheader("Answer")
-            st.write(answer)
-            if intent.intent == "coverage":
-                heading_paths = sorted(
-                    {c.heading_path for c in results if c.heading_path}
-                )
-                section_ids = sorted(
-                    {c.section_id for c in results if c.section_id}
-                )
-                pages = sorted({p for c in results for p in c.page_numbers})
-                page_range = (
-                    f"{pages[0]}-{pages[-1]}" if pages else "unknown"
-                )
-                bbox_preview = "unavailable"
-                cited_chunk = _select_cited_chunk(answer, results)
-                if cited_chunk and cited_chunk.polygons:
-                    bbox_preview = cited_chunk.polygons[0]
-                st.caption(f"Coverage mode used: {mode_used}")
-                st.caption(
-                    "Coverage expansion: "
-                    f"heading_path={heading_paths or ['unknown']}; "
-                    f"section_id={section_ids or ['unknown']}; "
-                    f"page_range={page_range}"
-                )
-                st.caption(
-                    f"Coverage subtype: {'CoverageAttribute' if intent.coverage_type == 'attribute' else 'CoverageList'}"
-                )
-                st.caption(f"Coverage bbox sample: {bbox_preview}")
-            if st.session_state.query_debug is not None:
-                with st.expander("Debug details"):
-                    st.json(st.session_state.query_debug)
+                        answer = synthesize_answer(query_input, results)
+                except RuntimeError as exc:
+                    answer = f"Synthesis unavailable: {exc}"
+                st.subheader("Answer")
+                st.write(answer)
+                if intent.intent == "coverage":
+                    heading_paths = sorted(
+                        {c.heading_path for c in results if c.heading_path}
+                    )
+                    section_ids = sorted(
+                        {c.section_id for c in results if c.section_id}
+                    )
+                    pages = sorted({p for c in results for p in c.page_numbers})
+                    page_range = (
+                        f"{pages[0]}-{pages[-1]}" if pages else "unknown"
+                    )
+                    bbox_preview = "unavailable"
+                    cited_chunk = _select_cited_chunk(answer, results)
+                    if cited_chunk and cited_chunk.polygons:
+                        bbox_preview = cited_chunk.polygons[0]
+                    st.caption(f"Coverage mode used: {mode_used}")
+                    st.caption(
+                        "Coverage expansion: "
+                        f"heading_path={heading_paths or ['unknown']}; "
+                        f"section_id={section_ids or ['unknown']}; "
+                        f"page_range={page_range}"
+                    )
+                    coverage_label = {
+                        "attribute": "CoverageAttribute",
+                        "numeric_list": "CoverageNumericList",
+                        "pointer": "CoveragePointer",
+                        "list": "CoverageList",
+                    }.get(intent.coverage_type or "list", "CoverageList")
+                    st.caption(f"Coverage subtype: {coverage_label}")
+                    st.caption(f"Coverage bbox sample: {bbox_preview}")
+                    if st.session_state.query_debug is not None:
+                        with st.expander("Debug details"):
+                            st.json(st.session_state.query_debug)
 
     if st.session_state.query_results:
         st.subheader("Sources")

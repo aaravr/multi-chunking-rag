@@ -1,4 +1,4 @@
-from dataclasses import replace
+from dataclasses import is_dataclass, replace
 from typing import Dict, List, Optional, Tuple
 
 from rank_bm25 import BM25Okapi
@@ -19,7 +19,7 @@ def _bm25_search(doc_id: str, query: str, top_k: int) -> List[RetrievedChunk]:
     rows = _fetch_chunk_rows(doc_id)
     if not rows:
         return []
-    corpus = [row[5].lower().split() for row in rows]
+    corpus = [row[6].lower().split() for row in rows]
     bm25 = BM25Okapi(corpus)
     scores = bm25.get_scores(query.lower().split())
     ranked = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)[:top_k]
@@ -27,7 +27,7 @@ def _bm25_search(doc_id: str, query: str, top_k: int) -> List[RetrievedChunk]:
     for idx, score in ranked:
         row = rows[idx]
         hit = vector_search._rows_to_chunks([row])[0]
-        results.append(replace(hit, score=float(score)))
+        results.append(_with_score(hit, float(score)))
     return results
 
 
@@ -38,7 +38,7 @@ def bm25_heading_anchor(
     if not rows:
         return None
     corpus = [
-        f"{row[10] or ''} {row[5] or ''}".lower().split()
+        f"{row[11] or ''} {row[6] or ''}".lower().split()
         for row in rows
     ]
     query_tokens = " ".join(phrases).lower().split()
@@ -49,7 +49,7 @@ def bm25_heading_anchor(
         return None
     row = rows[best[0]]
     hit = vector_search._rows_to_chunks([row])[0]
-    return replace(hit, score=float(best[1]))
+    return _with_score(hit, float(best[1]))
 
 
 def bm25_heading_anchor_candidates(
@@ -59,7 +59,7 @@ def bm25_heading_anchor_candidates(
     if not rows:
         return []
     corpus = [
-        f"{row[10] or ''} {row[5] or ''}".lower().split()
+        f"{row[11] or ''} {row[6] or ''}".lower().split()
         for row in rows
     ]
     query_tokens = " ".join(phrases).lower().split()
@@ -72,7 +72,7 @@ def bm25_heading_anchor_candidates(
             continue
         row = rows[idx]
         hit = vector_search._rows_to_chunks([row])[0]
-        results.append(replace(hit, score=float(score)))
+        results.append(_with_score(hit, float(score)))
     return results
 
 
@@ -85,7 +85,7 @@ def lexical_anchor_candidates(
     results: List[RetrievedChunk] = []
     lowered = [phrase.lower() for phrase in phrases]
     for row in rows:
-        text = f"{row[10] or ''} {row[5] or ''}".lower()
+        text = f"{row[11] or ''} {row[6] or ''}".lower()
         if any(phrase in text for phrase in lowered):
             hit = vector_search._rows_to_chunks([row])[0]
             results.append(hit)
@@ -103,6 +103,7 @@ def _fetch_chunk_rows(doc_id: str) -> List[Tuple]:
                        doc_id,
                        page_numbers,
                        macro_id,
+                       child_id,
                        chunk_type,
                        text_content,
                        char_start,
@@ -142,6 +143,13 @@ def _rrf_merge(
     results: List[RetrievedChunk] = []
     for chunk_id, score in ranked_ids:
         hit = by_id[chunk_id]
-        hit.score = float(score)
-        results.append(hit)
+        results.append(_with_score(hit, float(score)))
     return results
+
+
+def _with_score(hit, score: float):
+    if is_dataclass(hit):
+        return replace(hit, score=score)
+    if hasattr(hit, "score"):
+        hit.score = score
+    return hit

@@ -49,6 +49,7 @@ class RetrievedChunk:
     doc_id: str
     page_numbers: List[int]
     macro_id: int
+    child_id: int
     chunk_type: str
     text_content: str
     char_start: int
@@ -96,3 +97,16 @@ class ChunkRecord:
     embedding: List[float]
     heading_path: str
     section_id: str
+
+
+@dataclass(frozen=True)
+class DocumentFact:
+    doc_id: str
+    fact_name: str
+    value: Optional[str]
+    status: str
+    confidence: float
+    source_chunk_id: Optional[str]
+    page_numbers: List[int]
+    polygons: List[Dict[str, Any]]
+    evidence_excerpt: Optional[str]

@@ -13,6 +13,12 @@ CoverageQuery behavior (MUST):
 	•	Retrieval MUST locate an anchor chunk and expand scope to all chunks sharing the same heading_path or section_id (ordered by document position).
 	•	Answer MUST be derived from expanded scope, not top-K alone.
 
+CoverageQuery subtypes (MUST):
+	•	list: exhaustive list extraction from expanded scope (e.g., “list all significant events”).
+	•	attribute: numeric span extraction (e.g., “aggregate range of losses”).
+	•	numeric_list: list of items with numeric impacts (e.g., “items of note…net income…aggregate impact”).
+	•	pointer: section/note reference with citation (e.g., “where can I find…”).
+
 SemanticQuery behavior (MUST):
 	•	Default top-K vector retrieval is allowed.
 
@@ -39,3 +45,45 @@ The system MUST pass these scenarios (as integration tests or scripted demos):
 	•	“page X …” query returns evidence from that page
 	•	“list all significant events” returns complete list for that section
 	•	table-based attributes produce citations with polygons that highlight the correct region
+
+A6. Document-Level Fact Caching (MUST SUPPORT; ENABLED BY CONFIG)
+
+The system MUST SUPPORT deterministic, citation-backed document-level metadata facts with lineage.
+Fact extraction/caching MAY be enabled/disabled via configuration. When disabled, behavior falls back to the document-metadata retrieval plan.
+
+Facts to extract (initial scope):
+	•	default_currency
+	•	reporting_period
+	•	accounting_framework
+	•	units
+	•	consolidation_basis
+
+Data contract (MUST):
+Each fact MUST store:
+	•	value (string or null)
+	•	status (found | not_found | ambiguous)
+	•	confidence (float 0–1)
+	•	source_chunk_id (nullable if not_found/ambiguous)
+	•	page_numbers (searched pages when not_found/ambiguous)
+	•	polygons (nullable when not_found/ambiguous)
+	•	evidence_excerpt (nullable when not_found/ambiguous)
+
+Storage (MUST):
+Persist in a new table document_facts keyed by (doc_id, fact_name).
+
+Extraction rules (MUST):
+	•	Facts MUST be derived only from explicit evidence.
+	•	default_currency MUST NOT be inferred from transactional tables.
+	•	If multiple conflicting candidates exist, set status=ambiguous and do not choose a value.
+
+Retrieval behavior (MUST):
+	•	For document-metadata queries, the system MUST consult document_facts first.
+	•	If status=not_found/ambiguous OR record missing, perform a front-matter-only locate step and return:
+		(a) explicit value with citation, OR
+		(b) “not found/ambiguous” + searched pages, with no inference.
+	•	Front-matter locate MUST search pages 1–10 and the first occurrence of:
+		“Consolidated financial statements”, “Basis of presentation”,
+		“Significant accounting policies”, “Presentation currency”, “Functional currency”.
+
+Lineage (MUST):
+Each found fact MUST include full lineage per SPEC §4.2.

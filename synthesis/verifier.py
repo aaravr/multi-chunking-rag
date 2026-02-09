@@ -134,7 +134,7 @@ def _has_numeric_range(text: str) -> bool:
 
 def _extract_numeric_span(text: str) -> str:
     match = re.search(
-        r"(nil|none|zero)?\s*(?:to|through|between|from|-)\s*\$?\s*[\d,.]+(?:\s*(?:billion|million))?",
+        r"(nil|none|zero)?\s*(?:to|through|between|from|-)\s*(?:approximately\s+|approx\.\s+)?\$?\s*[\d,.]+(?:\s*(?:billion|million))?",
         text.lower(),
     )
     if match:
