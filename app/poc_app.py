@@ -18,6 +18,7 @@ from core.logging import configure_logging
 from storage.schema_contract import check_schema_contract
 from retrieval.metadata import detect_fact_name, handle_metadata_query
 from retrieval.router import classify_query, search_with_intent_debug
+from retrieval.bm25_index import warm_bm25_index
 from storage.db import get_connection
 from storage import repo
 from synthesis.openai_client import (
@@ -184,6 +185,7 @@ with st.sidebar:
                 progress_cb=_progress,
                 force_reprocess=force_reprocess,
             )
+            warm_bm25_index(st.session_state.doc_id)
             status_box.update(state="complete")
             st.success(f"Ingested: {st.session_state.doc_id}")
         except Exception as exc:

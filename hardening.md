@@ -46,3 +46,6 @@ B) Where hardened:
 C) How to validate:
    - exact commands to run tests
    - exact UI steps for any manual acceptance demo
+
+HARDENING LOG
+- 2026-02-09: BM25 index caching enforced (build once per corpus version; fail fast if missing/stale). See docs/decisions.md and docs/traceability.md for details and tests/test_bm25_index_manager.py for coverage.

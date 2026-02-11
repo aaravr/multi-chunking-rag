@@ -1,9 +1,8 @@
 from dataclasses import is_dataclass, replace
 from typing import Dict, List, Optional, Tuple
 
-from rank_bm25 import BM25Okapi
-
 from core.contracts import RetrievedChunk
+from retrieval.bm25_index import get_bm25_index
 from retrieval import vector_search
 from storage.db import get_connection
 
@@ -16,16 +15,12 @@ def hybrid_search(doc_id: str, query: str, top_k: int = 3) -> List[RetrievedChun
 
 
 def _bm25_search(doc_id: str, query: str, top_k: int) -> List[RetrievedChunk]:
-    rows = _fetch_chunk_rows(doc_id)
-    if not rows:
-        return []
-    corpus = [row[6].lower().split() for row in rows]
-    bm25 = BM25Okapi(corpus)
-    scores = bm25.get_scores(query.lower().split())
+    index = get_bm25_index(doc_id)
+    scores = index.bm25.get_scores(query.lower().split())
     ranked = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)[:top_k]
     results: List[RetrievedChunk] = []
     for idx, score in ranked:
-        row = rows[idx]
+        row = index.rows[idx]
         hit = vector_search._rows_to_chunks([row])[0]
         results.append(_with_score(hit, float(score)))
     return results
@@ -34,20 +29,13 @@ def _bm25_search(doc_id: str, query: str, top_k: int) -> List[RetrievedChunk]:
 def bm25_heading_anchor(
     doc_id: str, phrases: List[str]
 ) -> Optional[RetrievedChunk]:
-    rows = _fetch_chunk_rows(doc_id)
-    if not rows:
-        return None
-    corpus = [
-        f"{row[11] or ''} {row[6] or ''}".lower().split()
-        for row in rows
-    ]
+    index = get_bm25_index(doc_id)
     query_tokens = " ".join(phrases).lower().split()
-    bm25 = BM25Okapi(corpus)
-    scores = bm25.get_scores(query_tokens)
+    scores = index.bm25.get_scores(query_tokens)
     best = max(enumerate(scores), key=lambda x: x[1], default=None)
     if not best or best[1] <= 0:
         return None
-    row = rows[best[0]]
+    row = index.rows[best[0]]
     hit = vector_search._rows_to_chunks([row])[0]
     return _with_score(hit, float(best[1]))
 
@@ -55,22 +43,15 @@ def bm25_heading_anchor(
 def bm25_heading_anchor_candidates(
     doc_id: str, phrases: List[str], top_k: int = 25
 ) -> List[RetrievedChunk]:
-    rows = _fetch_chunk_rows(doc_id)
-    if not rows:
-        return []
-    corpus = [
-        f"{row[11] or ''} {row[6] or ''}".lower().split()
-        for row in rows
-    ]
+    index = get_bm25_index(doc_id)
     query_tokens = " ".join(phrases).lower().split()
-    bm25 = BM25Okapi(corpus)
-    scores = bm25.get_scores(query_tokens)
+    scores = index.bm25.get_scores(query_tokens)
     ranked = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)[:top_k]
     results: List[RetrievedChunk] = []
     for idx, score in ranked:
         if score <= 0:
             continue
-        row = rows[idx]
+        row = index.rows[idx]
         hit = vector_search._rows_to_chunks([row])[0]
         results.append(_with_score(hit, float(score)))
     return results

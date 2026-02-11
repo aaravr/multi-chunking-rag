@@ -128,6 +128,7 @@ Lineage-rich retrieval	§8.1	retrieval/	Retrieval tests	Planned
 Document metadata shortcut	§8.1	retrieval/metadata.py; app/poc_app.py	tests/test_document_facts.py	In-Progress
 LLM constrained to evidence	§8.2	synthesis/prompt	Hallucination test	Planned
 Items-of-note numeric_list anchor hardening	§8.1	retrieval/router.py	tests/test_items_of_note_anchor_not_adjusted_measures.py; tests/test_items_of_note_anchor_rejects_reconciliation_reference_only.py	Complete
+BM25 index caching for hybrid retrieval	§8.1	retrieval/bm25_index.py; retrieval/hybrid.py; app/poc_app.py	tests/test_bm25_index_manager.py	Complete
 
 
 ⸻
