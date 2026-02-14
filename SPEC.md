@@ -280,3 +280,24 @@ You MUST produce:
 4) A PR summary explicitly mapping changes to SPEC sections
 
 Failure to respect ANY section invalidates the PR.
+
+
+Rule:
+
+### 13. Engineering Quality & Runtime Safety (MUST)
+
+- The system MUST:
+	•	Avoid model reloading per request
+	•	Use connection pooling
+	•	Avoid unsafe deserialization
+	•	Enforce idempotent data writes
+	•	Maintain method complexity ≤ 10
+	•	Maintain max method length ≤ 40 lines
+	•	Avoid nested branching > 3 levels
+	•	Use explicit naming conventions
+	•	Include regression tests for bug fixes
+
+- All PRs must:
+	•	Pass complexity checks
+	•	Pass static analysis
+	•	Include updated traceability mapping

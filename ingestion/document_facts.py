@@ -91,20 +91,20 @@ def _collect_candidates(chunks: List[RetrievedChunk]) -> Dict[str, List[Tuple[st
 
 def _match_default_currency(text: str) -> Optional[str]:
     match = re.search(
-        r"all amounts are in ([A-Za-z\\s]+?) (dollars|currency)",
+        r"all amounts are in ([A-Za-z\s.]+?) (dollars|currency)",
         text,
         re.IGNORECASE,
     )
     if match:
         return f"{match.group(1).strip()} {match.group(2).strip()}"
-    match = re.search(r"all amounts are in (Canadian|U\\.S\\.|US) dollars", text, re.IGNORECASE)
+    match = re.search(r"all amounts are in (Canadian|U\.S\.|US) dollars", text, re.IGNORECASE)
     if match:
         return f"{match.group(1).replace('U.S.', 'U.S.').replace('US', 'U.S.')} dollars"
     return None
 
 
 def _match_units(text: str) -> Optional[str]:
-    match = re.search(r"all amounts are in ([A-Za-z\\s]+?) (millions|billions)", text, re.IGNORECASE)
+    match = re.search(r"all amounts are in ([A-Za-z\s.]+?) (millions|billions)", text, re.IGNORECASE)
     if match:
         return f"{match.group(2).lower()}"
     return None
@@ -125,7 +125,7 @@ def _match_consolidation(text: str) -> Optional[str]:
 
 
 def _match_reporting_period(text: str) -> Optional[str]:
-    match = re.search(r"year ended ([A-Za-z]+ \\d{1,2}, \\d{4})", text, re.IGNORECASE)
+    match = re.search(r"year ended ([A-Za-z]+ \d{1,2}, \d{4})", text, re.IGNORECASE)
     if match:
         return match.group(1)
     return None

@@ -12,6 +12,7 @@ def _get_bool_env(name: str, default: bool = False) -> bool:
 @dataclass
 class Settings:
     database_url: str = os.getenv("DATABASE_URL", "")
+    db_pool_size: int = int(os.getenv("DB_POOL_SIZE", "5"))
     embedding_model: str = "nomic-ai/modernbert-embed-base"
     embedding_dim: int = 768
     data_dir: str = os.getenv("IDP_DATA_DIR", "data")

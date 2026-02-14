@@ -190,6 +190,19 @@ Document-level fact caching	A6	ingestion/document_facts.py; retrieval/metadata.p
 
 ⸻
 
+⸻
+
+13. Engineering Quality & Runtime Safety (SPEC §13, WO-010)
+
+Requirement	Spec Ref	Impl	Tests	Status
+Model loads once per process	§13	embedding/model_registry.py; retrieval/vector_search.py; embedding/late_chunking.py	tests/test_wo010_model_singleton.py	Complete
+Connection pooling	§13	storage/db_pool.py; storage/db.py	tests/test_wo010_pool_usage.py	Complete
+No unsafe deserialization	§13	retrieval/bm25_index.py (JSON cache)	tests/test_wo010_no_pickle.py	Complete
+Regex extraction correct	§13	ingestion/document_facts.py	tests/test_wo010_regex_document_facts.py	Complete
+Idempotent chunk writes	§13	storage/migrations/003_chunks_idempotency.sql; storage/repo.py	tests/test_wo010_chunk_idempotency.py	Complete
+
+⸻
+
 Usage Rule
 	•	Every PR MUST update this file if it adds, completes, or modifies a requirement.
 	•	A PR that touches code without updating traceability must be rejected.

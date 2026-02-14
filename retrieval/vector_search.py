@@ -3,7 +3,7 @@ from typing import List, Optional
 from pgvector.psycopg2 import register_vector
 
 from core.contracts import RetrievedChunk
-from embedding.modernbert import ModernBERTEmbedder
+from embedding.model_registry import get_embedding_model
 from storage.db import get_connection
 
 
@@ -12,7 +12,7 @@ def search(
     query: str,
     top_k: int = 3,
 ) -> List[RetrievedChunk]:
-    embedder = ModernBERTEmbedder()
+    embedder = get_embedding_model()
     query_embedding = embedder.embed_text(query)
     with get_connection() as conn:
         register_vector(conn)
@@ -72,7 +72,7 @@ def search_on_pages(
 ) -> List[RetrievedChunk]:
     if not page_numbers:
         return []
-    embedder = ModernBERTEmbedder()
+    embedder = get_embedding_model()
     query_embedding = embedder.embed_text(query)
     with get_connection() as conn:
         register_vector(conn)

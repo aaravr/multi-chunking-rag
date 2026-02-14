@@ -190,6 +190,7 @@ def insert_chunks(conn, chunks: Iterable[ChunkRecord]) -> None:
                 embedding_dim
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (doc_id, macro_id, child_id) DO NOTHING
             """,
             rows,
         )

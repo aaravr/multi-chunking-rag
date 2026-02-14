@@ -1,9 +1,9 @@
 import os
 
-import psycopg2
 from psycopg2 import errors
 
 from core.config import settings
+from storage.db_pool import connect_direct
 
 
 def load_schema_sql() -> str:
@@ -31,7 +31,7 @@ def _load_migration(path: str) -> str:
 def run_setup() -> None:
     if not settings.database_url:
         raise RuntimeError("DATABASE_URL is required to set up the database.")
-    conn = psycopg2.connect(settings.database_url)
+    conn = connect_direct()
     conn.autocommit = True
     try:
         with conn.cursor() as cursor:

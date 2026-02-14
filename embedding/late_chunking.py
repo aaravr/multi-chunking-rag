@@ -8,7 +8,7 @@ import numpy as np
 
 from core.config import settings
 from core.contracts import CanonicalPage, CanonicalSpan, ChunkRecord
-from embedding.modernbert import ModernBERTEmbedder
+from embedding.model_registry import get_embedding_model
 
 
 def late_chunk_embeddings(
@@ -18,7 +18,7 @@ def late_chunk_embeddings(
     child_target_tokens: int = 256,
     progress_cb=None,
 ) -> List[ChunkRecord]:
-    embedder = ModernBERTEmbedder(max_length=macro_max_tokens)
+    embedder = get_embedding_model(max_length=macro_max_tokens)
     chunks: List[ChunkRecord] = []
     macro_id = 0
     total_macros = 0
@@ -128,7 +128,7 @@ def late_chunk_embeddings(
 
 def _build_macro_chunks(
     text: str,
-    embedder: ModernBERTEmbedder,
+    embedder,  # ModernBERTEmbedder from model_registry
     macro_max_tokens: int,
     macro_overlap_tokens: int,
 ) -> List[Tuple[str, int]]:

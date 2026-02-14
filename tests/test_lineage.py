@@ -34,7 +34,9 @@ class DummyEmbedder:
 
 
 def test_chunk_lineage_fields_present(monkeypatch):
-    monkeypatch.setattr(late_chunking, "ModernBERTEmbedder", DummyEmbedder)
+    from embedding import model_registry
+
+    monkeypatch.setattr(model_registry, "get_embedding_model", lambda **_: DummyEmbedder())
 
     span = CanonicalSpan(
         text="Hello world",
