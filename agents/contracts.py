@@ -1,0 +1,356 @@
+"""Typed agent contracts per MASTER_PROMPT §4.
+
+Every agent has a frozen input/output contract. These dataclasses are the
+ONLY way agents communicate — no untyped dicts cross agent boundaries.
+"""
+
+from __future__ import annotations
+
+import uuid
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
+
+# ── Shared value objects ──────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class Citation:
+    """Maps a [C#] tag in the answer to a specific chunk with page/polygon lineage."""
+    citation_id: str
+    chunk_id: str
+    doc_id: str
+    page_numbers: List[int]
+    polygons: List[Dict[str, Any]]
+    heading_path: str
+    section_id: str
+    text_snippet: str
+
+
+@dataclass(frozen=True)
+class TokenUsage:
+    """Token consumption tracker across all model calls."""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
+@dataclass(frozen=True)
+class CostBreakdown:
+    """Cost tracking per model tier."""
+    model_id: str = ""
+    input_cost: float = 0.0
+    output_cost: float = 0.0
+    total_cost: float = 0.0
+
+
+@dataclass(frozen=True)
+class ModelAttribution:
+    """Records which model was used, in which role, with usage stats."""
+    model_id: str
+    role: str           # e.g. "synthesis", "verification", "embedding"
+    input_tokens: int
+    output_tokens: int
+    latency_ms: float
+    cost_estimate: float
+
+
+@dataclass(frozen=True)
+class DocumentScope:
+    """Defines which documents/corpus to search."""
+    doc_ids: List[str] = field(default_factory=list)
+    corpus_id: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class PermissionSet:
+    """Placeholder for user permissions (RBAC + document-level)."""
+    user_id: str = ""
+    role: str = "reader"
+    clearance_level: int = 0
+
+
+@dataclass(frozen=True)
+class OutputFormat:
+    """Requested output style."""
+    format_type: str = "prose"  # "prose" | "bullet_list" | "comparison_table" | "citation_list"
+
+
+# ── Query Intent (extends PoC QueryIntent) ────────────────────────────
+
+@dataclass(frozen=True)
+class QueryIntent:
+    """Classified query intent (MASTER_PROMPT §4.2)."""
+    intent: str                                  # location | coverage | semantic | comparison | multi_hop | aggregation | metadata
+    pages: List[int] = field(default_factory=list)
+    coverage_type: Optional[str] = None          # list | attribute | numeric_list | pointer
+    status_filter: Optional[str] = None          # closed
+    entities: List[str] = field(default_factory=list)       # For comparison queries
+    time_periods: List[str] = field(default_factory=list)   # For comparison queries
+    sub_query_dependencies: List[str] = field(default_factory=list)  # For multi-hop
+
+
+# ── Agent Message Envelope (§5.1) ────────────────────────────────────
+
+@dataclass(frozen=True)
+class AgentMessage:
+    """Typed message envelope for inter-agent communication (§5.1)."""
+    message_id: str
+    query_id: str
+    from_agent: str
+    to_agent: str
+    message_type: str
+    payload: Dict[str, Any]
+    timestamp: str                 # ISO 8601
+    token_budget_remaining: int = 0
+
+
+# ── Router Agent Contracts (§4.2) ────────────────────────────────────
+
+@dataclass(frozen=True)
+class SubQuery:
+    """A decomposed sub-query with dependency tracking."""
+    sub_query_id: str
+    query_text: str
+    intent: QueryIntent
+    depends_on: List[str] = field(default_factory=list)  # sub_query_ids this depends on
+
+
+@dataclass(frozen=True)
+class RetrievalStrategy:
+    """How to retrieve evidence for a sub-query."""
+    method: str          # "vector" | "bm25" | "hybrid" | "metadata" | "section_expansion"
+    top_k: int = 10
+    filters: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class DocumentTarget:
+    """Identifies a specific document to search."""
+    doc_id: str
+    document_type: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class QueryPlan:
+    """Output of the Router Agent (§4.2)."""
+    query_id: str
+    original_query: str
+    resolved_query: str
+    primary_intent: QueryIntent
+    sub_queries: List[SubQuery]
+    retrieval_strategies: Dict[str, RetrievalStrategy]
+    document_targets: List[DocumentTarget]
+    estimated_token_cost: int = 0
+    classification_confidence: float = 0.0
+    classification_alternatives: List[QueryIntent] = field(default_factory=list)
+    classification_method: str = "deterministic"
+
+
+# ── Retriever Agent Contracts (§4.3) ────────────────────────────────
+
+@dataclass(frozen=True)
+class SearchScope:
+    """Records what was actually searched."""
+    doc_ids: List[str]
+    sections_searched: List[str] = field(default_factory=list)
+    pages_searched: List[int] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class RankedEvidence:
+    """Output of the Retriever Agent (§4.3)."""
+    query_id: str
+    sub_query_id: str
+    chunks: List[Any]                              # List[RetrievedChunk] from core.contracts
+    retrieval_methods: Dict[str, str]              # chunk_id → method
+    scores: Dict[str, float]                       # chunk_id → score
+    fusion_weights: Optional[Dict[str, float]] = None
+    total_candidates_scanned: int = 0
+    total_candidates_filtered: int = 0
+    search_scope: Optional[SearchScope] = None
+
+
+# ── Synthesiser Agent Contracts (§4.4) ───────────────────────────────
+
+@dataclass(frozen=True)
+class SynthesisResult:
+    """Output of the Synthesiser Agent (§4.4)."""
+    query_id: str
+    answer: str
+    citations: List[Citation]
+    prompt_template_id: str = ""
+    prompt_template_version: str = ""
+    model_id: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    synthesis_mode: str = "llm"  # "deterministic" | "llm" | "hybrid"
+
+
+# ── Verifier Agent Contracts (§4.5) ──────────────────────────────────
+
+@dataclass(frozen=True)
+class ClaimVerification:
+    """Per-claim verification result."""
+    claim_text: str
+    verdict: str         # SUPPORTED | UNSUPPORTED | PARTIALLY_SUPPORTED | UNVERIFIABLE
+    cited_chunk_ids: List[str]
+    evidence_overlap: float
+    reason: str
+
+
+@dataclass(frozen=True)
+class VerificationResult:
+    """Output of the Verifier Agent (§4.5)."""
+    query_id: str
+    overall_verdict: str          # PASS | FAIL | PARTIAL
+    overall_confidence: float
+    per_claim: List[ClaimVerification]
+    failed_claims: List[str]
+    verification_model: str = ""
+    verification_method: str = "deterministic"
+
+
+# ── Compliance Agent Contracts (§4.6) ────────────────────────────────
+
+@dataclass(frozen=True)
+class ComplianceViolation:
+    """A single compliance rule violation."""
+    rule_id: str
+    severity: str      # BLOCK | WARN
+    description: str
+    action_taken: str  # "redacted" | "blocked" | "disclaimer_appended"
+
+
+@dataclass(frozen=True)
+class ComplianceResult:
+    """Output of the Compliance Agent (§4.6)."""
+    query_id: str
+    passed: bool
+    violations: List[ComplianceViolation]
+    redactions_applied: int = 0
+    disclaimers_added: List[str] = field(default_factory=list)
+
+
+# ── Explainability Contracts (§4.7) ──────────────────────────────────
+
+@dataclass(frozen=True)
+class EvidenceLink:
+    """Maps a claim in the answer to its evidence chain."""
+    claim_text: str
+    citation_id: str
+    chunk_id: str
+    page_numbers: List[int]
+    polygons: List[Dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class DecisionStep:
+    """One step in the decision provenance chain."""
+    step_name: str
+    agent: str
+    decision: str
+    reason: str
+    timestamp: str
+
+
+@dataclass(frozen=True)
+class ExplainabilityReport:
+    """Output of the Explainability Agent (§4.7)."""
+    query_id: str
+    timestamp: str
+    # Level 1 — Decision Provenance
+    decision_chain: List[DecisionStep]
+    evidence_map: List[EvidenceLink]
+    # Level 2 — Model Attribution
+    models_used: List[ModelAttribution]
+    total_cost: float = 0.0
+    # Levels 3-4 are computed on-demand
+    sensitivity_analysis: Optional[Dict[str, Any]] = None
+    calibration_report: Optional[Dict[str, Any]] = None
+
+
+# ── Orchestrator Contracts (§4.1) ────────────────────────────────────
+
+@dataclass(frozen=True)
+class ConversationTurn:
+    """A single turn in the conversation."""
+    role: str            # "user" | "assistant"
+    content: str
+    query_id: Optional[str] = None
+    timestamp: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ConversationMemory:
+    """Conversational context for coreference resolution (§6.2)."""
+    session_id: str
+    user_id: str = ""
+    recent_turns: List[ConversationTurn] = field(default_factory=list)
+    active_doc_ids: List[str] = field(default_factory=list)
+    unresolved_references: List[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class OrchestratorInput:
+    """Input to the Orchestrator Agent (§4.1)."""
+    query_id: str
+    user_query: str
+    conversation_memory: ConversationMemory
+    document_scope: DocumentScope
+    user_permissions: PermissionSet
+    output_format: OutputFormat = field(default_factory=OutputFormat)
+    token_budget: int = 50000
+
+
+@dataclass(frozen=True)
+class ExecutionStep:
+    """Record of a single step in the orchestrator's execution trace."""
+    step_id: str
+    agent: str
+    action: str
+    status: str       # "pending" | "running" | "completed" | "failed"
+    result_summary: str = ""
+    tokens_used: int = 0
+    latency_ms: float = 0.0
+    timestamp: str = ""
+
+
+@dataclass(frozen=True)
+class OrchestratorOutput:
+    """Output of the Orchestrator Agent (§4.1)."""
+    query_id: str
+    answer: str
+    citations: List[Citation]
+    confidence: float
+    explainability_report: Optional[ExplainabilityReport] = None
+    execution_trace: List[ExecutionStep] = field(default_factory=list)
+    token_usage: TokenUsage = field(default_factory=TokenUsage)
+    warnings: List[str] = field(default_factory=list)
+
+
+# ── Audit Log Entry (§2.4) ──────────────────────────────────────────
+
+@dataclass(frozen=True)
+class AuditLogEntry:
+    """Immutable audit record for every LLM call (§2.4)."""
+    log_id: str
+    query_id: str
+    agent_id: str
+    step_id: str
+    event_type: str            # "llm_call" | "retrieval" | "verification" | "compliance"
+    model_id: str
+    prompt_template_version: str
+    full_prompt: str
+    full_response: str
+    input_tokens: int
+    output_tokens: int
+    temperature: float
+    latency_ms: float
+    cost_estimate: float
+    user_id: str
+    timestamp: str             # ISO 8601
+
+
+def new_id() -> str:
+    """Generate a new UUID string."""
+    return str(uuid.uuid4())

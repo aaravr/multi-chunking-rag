@@ -1,0 +1,124 @@
+"""Versioned Prompt Registry (MASTER_PROMPT §4.4, §11).
+
+Template selection is deterministic based on (intent_type, coverage_subtype, output_format).
+Templates are versioned by content hash and logged with every synthesis call.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+from dataclasses import dataclass
+from typing import Dict, Optional, Tuple
+
+from synthesis import prompts as poc_prompts
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class PromptTemplate:
+    """A versioned prompt template."""
+    template_id: str
+    intent_type: str
+    system_prompt: str
+    user_prompt: str
+    version: str         # Content hash for reproducibility
+
+
+def _hash_content(text: str) -> str:
+    """Compute short hash of prompt content for versioning."""
+    return hashlib.sha256(text.encode()).hexdigest()[:12]
+
+
+def _make_template(template_id: str, intent_type: str, system: str, user: str) -> PromptTemplate:
+    combined = system + user
+    return PromptTemplate(
+        template_id=template_id,
+        intent_type=intent_type,
+        system_prompt=system,
+        user_prompt=user,
+        version=_hash_content(combined),
+    )
+
+
+# ── Built-in templates (migrated from PoC synthesis/prompts.py) ──────
+
+_REGISTRY: Dict[str, PromptTemplate] = {}
+
+
+def _register(t: PromptTemplate) -> PromptTemplate:
+    _REGISTRY[t.template_id] = t
+    return t
+
+
+# Standard QA
+SEMANTIC_QA = _register(_make_template(
+    "semantic_qa",
+    "semantic",
+    poc_prompts.SYSTEM,
+    poc_prompts.USER,
+))
+
+# Coverage list extraction
+COVERAGE_LIST = _register(_make_template(
+    "coverage_list",
+    "coverage",
+    poc_prompts.COVERAGE_SYSTEM,
+    poc_prompts.COVERAGE_USER,
+))
+
+# Coverage closed matters
+COVERAGE_CLOSED = _register(_make_template(
+    "coverage_closed",
+    "coverage",
+    poc_prompts.COVERAGE_CLOSED_SYSTEM,
+    poc_prompts.COVERAGE_CLOSED_USER,
+))
+
+# Coverage attribute (numeric extraction)
+COVERAGE_ATTRIBUTE = _register(_make_template(
+    "coverage_attribute",
+    "coverage",
+    poc_prompts.COVERAGE_ATTRIBUTE_SYSTEM,
+    poc_prompts.COVERAGE_ATTRIBUTE_USER,
+))
+
+
+def get_template(
+    intent_type: str,
+    coverage_subtype: Optional[str] = None,
+    status_filter: Optional[str] = None,
+) -> PromptTemplate:
+    """Select the correct prompt template based on query classification.
+
+    Template selection is deterministic (§4.4).
+    """
+    if intent_type == "coverage":
+        if status_filter == "closed":
+            return COVERAGE_CLOSED
+        if coverage_subtype == "attribute":
+            return COVERAGE_ATTRIBUTE
+        return COVERAGE_LIST
+
+    # Default: semantic QA template (also used for location, comparison, etc.)
+    return SEMANTIC_QA
+
+
+def get_template_by_id(template_id: str) -> Optional[PromptTemplate]:
+    """Look up a template by its ID."""
+    return _REGISTRY.get(template_id)
+
+
+def list_templates() -> Dict[str, Tuple[str, str]]:
+    """Return {template_id: (intent_type, version)} for all registered templates."""
+    return {
+        tid: (t.intent_type, t.version)
+        for tid, t in _REGISTRY.items()
+    }
+
+
+def register_template(template: PromptTemplate) -> None:
+    """Register a custom prompt template."""
+    _REGISTRY[template.template_id] = template
+    logger.info("Registered prompt template: %s (v=%s)", template.template_id, template.version)

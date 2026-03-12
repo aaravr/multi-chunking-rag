@@ -1,6 +1,6 @@
 from typing import Iterable, List, Optional
 
-from psycopg2.extras import Json
+from psycopg2.extras import Json, execute_values
 from pgvector.psycopg2 import register_vector
 
 from core.contracts import ChunkRecord, DocumentFact, DocumentRecord, PageRecord, TriageMetrics
@@ -75,7 +75,8 @@ def insert_pages(conn, pages: Iterable[PageRecord]) -> None:
     if not rows:
         return
     with conn.cursor() as cursor:
-        cursor.executemany(
+        execute_values(
+            cursor,
             """
             INSERT INTO pages (
                 doc_id,
@@ -85,7 +86,7 @@ def insert_pages(conn, pages: Iterable[PageRecord]) -> None:
                 reason_codes,
                 di_json_path
             )
-            VALUES (%s, %s, %s, %s, %s, %s)
+            VALUES %s
             ON CONFLICT (doc_id, page_number) DO UPDATE
             SET triage_metrics = EXCLUDED.triage_metrics,
                 triage_decision = EXCLUDED.triage_decision,
@@ -169,7 +170,8 @@ def insert_chunks(conn, chunks: Iterable[ChunkRecord]) -> None:
     if not rows:
         return
     with conn.cursor() as cursor:
-        cursor.executemany(
+        execute_values(
+            cursor,
             """
             INSERT INTO chunks (
                 chunk_id,
@@ -189,7 +191,7 @@ def insert_chunks(conn, chunks: Iterable[ChunkRecord]) -> None:
                 embedding_model,
                 embedding_dim
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES %s
             ON CONFLICT (doc_id, macro_id, child_id) DO NOTHING
             """,
             rows,
@@ -214,7 +216,8 @@ def upsert_document_facts(conn, facts: Iterable[DocumentFact]) -> None:
     if not rows:
         return
     with conn.cursor() as cursor:
-        cursor.executemany(
+        execute_values(
+            cursor,
             """
             INSERT INTO document_facts (
                 doc_id,
@@ -227,7 +230,7 @@ def upsert_document_facts(conn, facts: Iterable[DocumentFact]) -> None:
                 polygons,
                 evidence_excerpt
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES %s
             ON CONFLICT (doc_id, fact_name) DO UPDATE
             SET value = EXCLUDED.value,
                 status = EXCLUDED.status,
