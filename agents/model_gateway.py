@@ -155,11 +155,19 @@ class ModelGateway:
                 f"Circuit breaker open for '{model_id}' and no fallback available."
             )
 
-        # Execute the call
+        # Execute the call — wrapped in OTel INTERNAL span
+        from agents.otel_instrumentation import trace_llm_call, set_llm_result
+
         full_prompt = "\n".join(m.get("content", "") for m in messages)
         start = time.monotonic()
         try:
-            result = self._execute_openai_call(model_id, messages, temperature)
+            with trace_llm_call(
+                model_id=model_id,
+                agent_id=agent_id,
+                query_id=query_id,
+                temperature=temperature,
+            ) as span:
+                result = self._execute_openai_call(model_id, messages, temperature)
         except Exception as exc:
             circuit.record_failure()
             latency_ms = (time.monotonic() - start) * 1000
@@ -186,6 +194,15 @@ class ModelGateway:
         cost = (
             (input_tokens / 1000) * reg.cost_per_1k_input
             + (output_tokens / 1000) * reg.cost_per_1k_output
+        )
+
+        # Record LLM result on OTel span
+        set_llm_result(
+            span=span,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost=cost,
+            model_id=model_id,
         )
 
         self._total_tokens += input_tokens + output_tokens

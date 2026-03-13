@@ -15,3 +15,6 @@ rank-bm25
 sentence-transformers
 redis
 kafka-python
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-exporter-otlp-proto-grpc

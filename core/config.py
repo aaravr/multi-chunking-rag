@@ -62,6 +62,15 @@ class Settings:
     kafka_ssl_cafile: str = os.getenv("KAFKA_SSL_CAFILE", "")
     kafka_ssl_certfile: str = os.getenv("KAFKA_SSL_CERTFILE", "")
     kafka_ssl_keyfile: str = os.getenv("KAFKA_SSL_KEYFILE", "")
+    # ── OpenTelemetry (§5, §8) ─────────────────────────────────────────
+    enable_otel: bool = _get_bool_env("ENABLE_OTEL", False)
+    otel_exporter_endpoint: str = os.getenv("OTEL_EXPORTER_ENDPOINT", "localhost:4317")
+    otel_service_name: str = os.getenv("OTEL_SERVICE_NAME", "idp-agent")
+    otel_sample_rate: float = float(os.getenv("OTEL_SAMPLE_RATE", "1.0"))
+    otel_export_console: bool = _get_bool_env("OTEL_EXPORT_CONSOLE", False)
+    # ── Agent Evaluation ───────────────────────────────────────────────
+    enable_agent_eval: bool = _get_bool_env("ENABLE_AGENT_EVAL", False)
+    agent_eval_log_dir: str = os.getenv("AGENT_EVAL_LOG_DIR", "eval_logs")
 
 
 settings = Settings()

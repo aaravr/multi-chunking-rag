@@ -270,14 +270,23 @@ class AgentCore:
             envelope.attempt,
         )
 
-        # Step 3: Call handler
+        # Step 3: Call handler — wrapped in OTel SERVER span
+        from agents.otel_instrumentation import trace_agent_handle
+
         start = time.monotonic()
         response_payload = None
         error = None
         error_code = ErrorCode.NONE
         try:
-            result = self._handler(message)
-            response_payload = serialise_response(result)
+            with trace_agent_handle(
+                agent_name=self._agent_name,
+                message_type=message.message_type,
+                query_id=message.query_id,
+                correlation_id=correlation_id,
+                trace_ctx=envelope.trace,
+            ) as span:
+                result = self._handler(message)
+                response_payload = serialise_response(result)
         except Exception as exc:
             logger.exception(
                 "AgentCore[%s]: handler failed for corr=%s",
@@ -620,6 +629,16 @@ def main() -> None:
     )
 
     from core.config import settings
+
+    # Initialise OTel if enabled
+    if settings.enable_otel:
+        from agents.otel_provider import init_otel
+        init_otel(
+            service_name=f"idp-{args.agent}",
+            endpoint=settings.otel_exporter_endpoint,
+            sample_rate=settings.otel_sample_rate,
+            console_export=settings.otel_export_console,
+        )
 
     bootstrap = args.bootstrap_servers or settings.kafka_bootstrap_servers
     if not bootstrap:

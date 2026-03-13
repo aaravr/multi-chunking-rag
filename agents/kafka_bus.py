@@ -306,6 +306,8 @@ class KafkaBus:
         attempt: int,
     ) -> Any:
         """Single send attempt with correlation-based response waiting."""
+        from agents.otel_instrumentation import trace_kafka_send, record_kafka_e2e_latency
+
         correlation_id = new_id()
         start_time = time.monotonic()
 
@@ -338,14 +340,22 @@ class KafkaBus:
         with self._pending_lock:
             self._pending[correlation_id] = pending
 
-        # Produce to target agent's request topic
+        # Produce to target agent's request topic — wrapped in OTel CLIENT span
         target_topic = request_topic_for(message.to_agent)
-        self._producer.send(
-            target_topic,
-            value=serialise_envelope(envelope),
-            key=message.query_id.encode("utf-8"),
-        )
-        self._producer.flush()
+        with trace_kafka_send(
+            from_agent=message.from_agent,
+            to_agent=message.to_agent,
+            message_type=message.message_type,
+            query_id=message.query_id,
+            correlation_id=correlation_id,
+            attempt=attempt,
+        ) as span:
+            self._producer.send(
+                target_topic,
+                value=serialise_envelope(envelope),
+                key=message.query_id.encode("utf-8"),
+            )
+            self._producer.flush()
 
         logger.info(
             "KafkaBus: %s -> %s [%s] corr=%s trace=%s attempt=%d topic=%s",
@@ -376,9 +386,10 @@ class KafkaBus:
         with self._pending_lock:
             self._pending.pop(correlation_id, None)
 
-        # Record latency
+        # Record latency (both internal metrics and OTel histogram)
         latency_ms = (time.monotonic() - start_time) * 1000
         metrics.record_e2e_latency(latency_ms)
+        record_kafka_e2e_latency(message.to_agent, latency_ms)
 
         # Update audit record
         record.delivered = True
