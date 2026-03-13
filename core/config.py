@@ -29,6 +29,9 @@ class Settings:
     enable_redis_working_memory: bool = _get_bool_env("ENABLE_REDIS_WORKING_MEMORY", True)
     redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     redis_working_memory_ttl: int = int(os.getenv("REDIS_WORKING_MEMORY_TTL", "900"))
+    enable_kafka_bus: bool = _get_bool_env("ENABLE_KAFKA_BUS", False)
+    kafka_bootstrap_servers: str = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+    kafka_request_timeout_ms: int = int(os.getenv("KAFKA_REQUEST_TIMEOUT_MS", "30000"))
 
 
 settings = Settings()

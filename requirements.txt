@@ -14,3 +14,4 @@ pytest
 rank-bm25
 sentence-transformers
 redis
+kafka-python
