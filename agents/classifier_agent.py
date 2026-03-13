@@ -105,6 +105,12 @@ MEMORY_MIN_OBSERVATIONS = 3
 MEMORY_MAX_ENTRIES = 10000
 EMBEDDING_SIMILARITY_THRESHOLD = 0.85
 SGD_MIN_SAMPLES = 5
+FILENAME_MATCH_CONFIDENCE = 0.80
+DETERMINISTIC_RESOLVE_THRESHOLD = 0.85
+SGD_PREDICT_THRESHOLD = 0.6
+LLM_CONFIDENCE_CAP = 0.95
+FRONT_MATTER_EMBED_LIMIT = 2000
+FRONT_MATTER_LLM_LIMIT = 4000
 
 
 # ── LangChain Prompt Templates ────────────────────────────────────────
@@ -230,7 +236,7 @@ def _pgvector_count() -> int:
 
 def _neo4j_available() -> bool:
     """Check if Neo4j knowledge graph is enabled and available."""
-    return settings.enable_neo4j
+    return settings.neo4j.enabled
 
 
 def _neo4j_store_classification(
@@ -270,115 +276,71 @@ def _neo4j_find_similar(
         return []
 
 
-# ── Classification Memory (pgvector + Neo4j + sklearn) ────────────────
+# ── Embedding Store (pgvector + in-memory fallback) ───────────────────
 
-class ClassificationMemory:
-    """Self-learning classification memory using pgvector + Neo4j + sklearn.
+class EmbeddingStore:
+    """Stores and retrieves document classification embeddings.
 
-    **Vector DB (pgvector)**: Primary store for classification embeddings.
-    Uses PostgreSQL + pgvector with HNSW cosine index for persistent
-    similarity search. Falls back to in-memory numpy when DATABASE_URL
-    is not configured (unit tests, local dev without DB).
-
-    **Knowledge Graph (Neo4j)**: Stores document classification relationships
-    as a graph (Document→DocumentType→ClassificationLabel). Enables
-    graph-based discovery of similar documents and classification patterns.
-    Feature-flagged via ENABLE_NEO4J.
-
-    **SGDClassifier (sklearn)**: Online learning from embeddings for trainable
-    classification beyond nearest-neighbor. Trained incrementally with
-    partial_fit() on every new classification.
-
-    **Pattern store**: keyword/filename index for zero-cost exact matches.
+    Primary backend: pgvector HNSW index in PostgreSQL.
+    Fallback: in-memory numpy cosine similarity (for unit tests / no DB).
     """
 
-    def __init__(self, embedding_dim: int = 768, use_db: Optional[bool] = None) -> None:
+    def __init__(self, embedding_dim: int = 768, use_db: bool = False) -> None:
         self._embedding_dim = embedding_dim
-
-        # Whether to use pgvector DB backend. None = auto-detect.
-        self._use_db = use_db if use_db is not None else _pgvector_available()
-
-        # ── In-memory fallback (used when pgvector unavailable) ───────
+        self._use_db = use_db
         self._mem_embeddings: List[np.ndarray] = []
         self._mem_doc_types: List[str] = []
         self._mem_class_labels: List[str] = []
         self._mem_labels: List[str] = []  # compound "type::label"
 
-        # ── sklearn SGD classifier ────────────────────────────────────
-        self._sgd: SGDClassifier = SGDClassifier(
-            loss="modified_huber",
-            penalty="l2",
-            alpha=1e-4,
-            max_iter=1,
-            tol=None,
-            warm_start=True,
-            random_state=42,
-        )
-        self._sgd_classes: List[str] = []
-        self._sgd_fitted: bool = False
-        self._sgd_sample_count: int = 0
+    @property
+    def embedding_count(self) -> int:
+        return len(self._mem_embeddings)
 
-        # ── Pattern store (keyword/filename) ──────────────────────────
-        self._patterns: Dict[str, ClassificationMemoryEntry] = {}
-        self._filename_index: Dict[str, List[str]] = defaultdict(list)
-        self._keyword_index: Dict[str, List[str]] = defaultdict(list)
+    @property
+    def mem_labels(self) -> List[str]:
+        return self._mem_labels
 
-    # ── pgvector / in-memory embedding operations ────────────────────
-
-    def store_embedding(
+    def store(
         self,
         embedding: np.ndarray,
         document_type: str,
         classification_label: str,
         source_doc_id: Optional[str] = None,
-    ) -> None:
-        """Store a document embedding in pgvector (or in-memory fallback) + train SGD."""
+    ) -> Optional[np.ndarray]:
+        """Store embedding; returns the normalized array or None on dim mismatch."""
         emb = np.asarray(embedding, dtype=np.float32).ravel()
         if emb.shape[0] != self._embedding_dim:
             logger.warning(
                 "Embedding dim mismatch: expected %d, got %d",
                 self._embedding_dim, emb.shape[0],
             )
-            return
+            return None
 
-        compound_label = f"{document_type}::{classification_label}"
-        embedding_id = new_id()
-
-        # Primary: pgvector persistent storage
         if self._use_db:
             _pgvector_store_embedding(
-                embedding_id, emb, document_type, classification_label, source_doc_id,
+                new_id(), emb, document_type, classification_label, source_doc_id,
             )
 
-        # Always keep in-memory copy for SGD training + stats
         self._mem_embeddings.append(emb)
-        self._mem_labels.append(compound_label)
+        self._mem_labels.append(f"{document_type}::{classification_label}")
         self._mem_doc_types.append(document_type)
         self._mem_class_labels.append(classification_label)
+        return emb
 
-        self._train_incremental(emb, compound_label)
-
-    def lookup_by_embedding(
+    def lookup(
         self,
         query_embedding: np.ndarray,
         threshold: float = EMBEDDING_SIMILARITY_THRESHOLD,
     ) -> Optional[Tuple[str, str, float]]:
-        """Find the most similar stored document via pgvector cosine similarity.
-
-        Primary: pgvector HNSW index in PostgreSQL.
-        Fallback: in-memory numpy cosine similarity (when DB unavailable).
-
-        Returns (document_type, classification_label, similarity) or None.
-        """
+        """Find the most similar stored document. Returns (doc_type, label, sim) or None."""
         query_emb = np.asarray(query_embedding, dtype=np.float32).ravel()
 
-        # Try pgvector first
         if self._use_db:
             result = _pgvector_search_embedding(query_emb, threshold)
             if result is not None:
                 return result
 
-        # Fallback: in-memory numpy cosine similarity
         return self._lookup_in_memory(query_emb, threshold)
 
     def _lookup_in_memory(
@@ -386,11 +348,9 @@ class ClassificationMemory:
         query_emb: np.ndarray,
         threshold: float,
     ) -> Optional[Tuple[str, str, float]]:
-        """In-memory cosine similarity fallback when pgvector is unavailable."""
         if not self._mem_embeddings:
             return None
 
-        # Compute cosine similarities
         query_norm = query_emb / (np.linalg.norm(query_emb) + 1e-10)
         best_sim = -1.0
         best_idx = -1
@@ -404,16 +364,74 @@ class ClassificationMemory:
         if best_sim < threshold or best_idx < 0:
             return None
 
-        return (
-            self._mem_doc_types[best_idx],
-            self._mem_class_labels[best_idx],
-            best_sim,
-        )
+        return (self._mem_doc_types[best_idx], self._mem_class_labels[best_idx], best_sim)
 
-    def predict_sgd(
-        self, query_embedding: np.ndarray
-    ) -> Optional[Tuple[str, str, float]]:
-        """Use the SGDClassifier to predict classification."""
+    def load_from_rows(self, rows: List[dict]) -> None:
+        """Bulk-load embeddings from pgvector rows into in-memory store."""
+        for row in rows:
+            emb = np.array(row["embedding"], dtype=np.float32)
+            compound = f"{row['document_type']}::{row['classification_label']}"
+            self._mem_embeddings.append(emb)
+            self._mem_labels.append(compound)
+            self._mem_doc_types.append(row["document_type"])
+            self._mem_class_labels.append(row["classification_label"])
+
+    def export_embeddings(self) -> List[dict]:
+        result = []
+        for i, emb in enumerate(self._mem_embeddings):
+            result.append({
+                "embedding": emb.tolist(),
+                "document_type": self._mem_doc_types[i],
+                "classification_label": self._mem_class_labels[i],
+            })
+        return result
+
+    def import_embeddings(self, embeddings: List[dict]) -> int:
+        count = 0
+        for item in embeddings:
+            emb = np.array(item["embedding"], dtype=np.float32)
+            compound = f"{item['document_type']}::{item['classification_label']}"
+            self._mem_embeddings.append(emb)
+            self._mem_doc_types.append(item["document_type"])
+            self._mem_class_labels.append(item["classification_label"])
+            self._mem_labels.append(compound)
+            count += 1
+        return count
+
+
+# ── SGD Classifier Wrapper ────────────────────────────────────────────
+
+class SGDClassifierWrapper:
+    """Online-learning SGD classifier trained incrementally on embeddings."""
+
+    def __init__(self) -> None:
+        self._sgd: SGDClassifier = SGDClassifier(
+            loss="modified_huber",
+            penalty="l2",
+            alpha=1e-4,
+            max_iter=1,
+            tol=None,
+            warm_start=True,
+            random_state=42,
+        )
+        self._sgd_classes: List[str] = []
+        self._sgd_fitted: bool = False
+        self._sgd_sample_count: int = 0
+
+    @property
+    def fitted(self) -> bool:
+        return self._sgd_fitted
+
+    @property
+    def sample_count(self) -> int:
+        return self._sgd_sample_count
+
+    @property
+    def classes(self) -> List[str]:
+        return list(self._sgd_classes)
+
+    def predict(self, query_embedding: np.ndarray) -> Optional[Tuple[str, str, float]]:
+        """Predict classification from embedding. Returns (doc_type, label, confidence) or None."""
         if not self._sgd_fitted or self._sgd_sample_count < SGD_MIN_SAMPLES:
             return None
 
@@ -431,10 +449,9 @@ class ClassificationMemory:
             logger.warning("SGD prediction failed: %s", exc)
             return None
 
-    def _train_incremental(self, embedding: np.ndarray, compound_label: str) -> None:
-        """Incrementally train SGDClassifier with a single new sample."""
-        X = embedding.reshape(1, -1)
-
+    def train_incremental(self, embedding: np.ndarray, compound_label: str,
+                          embedding_store: EmbeddingStore) -> None:
+        """Train on a single new sample, bootstrapping from store if needed."""
         if compound_label not in self._sgd_classes:
             self._sgd_classes.append(compound_label)
 
@@ -442,10 +459,11 @@ class ClassificationMemory:
             self._sgd_sample_count += 1
             return
 
-        if not self._sgd_fitted and len(self._mem_embeddings) >= 2:
-            self._retrain_sgd_from_store()
+        if not self._sgd_fitted and embedding_store.embedding_count >= 2:
+            self._retrain_from_store(embedding_store)
             return
 
+        X = embedding.reshape(1, -1)
         try:
             self._sgd.partial_fit(X, [compound_label], classes=self._sgd_classes)
             self._sgd_fitted = True
@@ -453,49 +471,31 @@ class ClassificationMemory:
         except Exception as exc:
             logger.warning("SGD incremental training failed: %s", exc)
 
-    def _retrain_sgd_from_store(self) -> None:
-        """Retrain SGDClassifier from all stored embeddings."""
-        if not self._mem_embeddings or len(self._sgd_classes) < 2:
+    def _retrain_from_store(self, embedding_store: EmbeddingStore) -> None:
+        """Retrain SGD from all stored embeddings."""
+        if not embedding_store._mem_embeddings or len(self._sgd_classes) < 2:
             return
-        X = np.stack(self._mem_embeddings)
-        y = self._mem_labels
+        X = np.stack(embedding_store._mem_embeddings)
+        y = embedding_store.mem_labels
         try:
             self._sgd.partial_fit(X, y, classes=self._sgd_classes)
             self._sgd_fitted = True
-            self._sgd_sample_count = len(self._mem_embeddings)
+            self._sgd_sample_count = len(embedding_store._mem_embeddings)
         except Exception as exc:
             logger.warning("SGD retrain failed: %s", exc)
 
-    def bootstrap_sgd_from_pgvector(self) -> int:
-        """Load all embeddings from pgvector and retrain SGD.
 
-        Use on startup to warm the SGD classifier from persistent storage.
-        Returns the number of embeddings loaded.
-        """
-        if not self._use_db:
-            return 0
-        rows = _pgvector_fetch_all()
-        if not rows:
-            return 0
-        for row in rows:
-            emb = np.array(row["embedding"], dtype=np.float32)
-            compound = f"{row['document_type']}::{row['classification_label']}"
-            self._mem_embeddings.append(emb)
-            self._mem_labels.append(compound)
-            self._mem_doc_types.append(row["document_type"])
-            self._mem_class_labels.append(row["classification_label"])
-            if compound not in self._sgd_classes:
-                self._sgd_classes.append(compound)
-        if len(self._sgd_classes) >= 2:
-            self._retrain_sgd_from_store()
-        else:
-            self._sgd_sample_count = len(self._mem_embeddings)
-        logger.info("Bootstrapped SGD from pgvector: %d embeddings", len(rows))
-        return len(rows)
+# ── Pattern Store ─────────────────────────────────────────────────────
 
-    # ── Pattern store operations ──────────────────────────────────────
+class PatternStore:
+    """Keyword/filename pattern index for zero-cost exact matches."""
 
-    def store_pattern(
+    def __init__(self) -> None:
+        self._patterns: Dict[str, ClassificationMemoryEntry] = {}
+        self._filename_index: Dict[str, List[str]] = defaultdict(list)
+        self._keyword_index: Dict[str, List[str]] = defaultdict(list)
+
+    def store(
         self,
         document_type: str,
         classification_label: str,
@@ -582,36 +582,13 @@ class ClassificationMemory:
         )
         self._patterns[pattern_id] = updated
 
-    def get_all_patterns(self) -> List[ClassificationMemoryEntry]:
+    def get_all(self) -> List[ClassificationMemoryEntry]:
         return list(self._patterns.values())
 
-    def get_stats(self) -> Dict[str, Any]:
-        patterns = list(self._patterns.values())
-        trusted = [p for p in patterns if p.accuracy >= MEMORY_TRUST_THRESHOLD and p.total_count >= MEMORY_MIN_OBSERVATIONS]
-        pgvector_count = _pgvector_count() if self._use_db else 0
-        return {
-            "total_patterns": len(patterns),
-            "trusted_patterns": len(trusted),
-            "total_observations": sum(p.total_count for p in patterns),
-            "avg_accuracy": (sum(p.accuracy for p in patterns) / len(patterns) if patterns else 0.0),
-            "embedding_count": len(self._mem_embeddings),
-            "pgvector_count": pgvector_count,
-            "vector_backend": "pgvector" if self._use_db else "in-memory",
-            "neo4j_enabled": _neo4j_available(),
-            "sgd_fitted": self._sgd_fitted,
-            "sgd_sample_count": self._sgd_sample_count,
-            "sgd_classes": list(self._sgd_classes),
-        }
-
-    def export_json(self) -> str:
-        data = {
-            "patterns": [],
-            "embeddings": [],
-            "sgd_classes": self._sgd_classes,
-            "sgd_sample_count": self._sgd_sample_count,
-        }
+    def export_patterns(self) -> List[dict]:
+        result = []
         for entry in self._patterns.values():
-            data["patterns"].append({
+            result.append({
                 "pattern_id": entry.pattern_id,
                 "document_type": entry.document_type,
                 "classification_label": entry.classification_label,
@@ -622,25 +599,10 @@ class ClassificationMemory:
                 "total_count": entry.total_count,
                 "last_used": entry.last_used,
             })
-        for i, emb in enumerate(self._mem_embeddings):
-            data["embeddings"].append({
-                "embedding": emb.tolist(),
-                "document_type": self._mem_doc_types[i],
-                "classification_label": self._mem_class_labels[i],
-            })
-        return json.dumps(data, indent=2)
+        return result
 
-    def import_json(self, raw: str) -> int:
-        data = json.loads(raw)
+    def import_patterns(self, patterns: List[dict]) -> int:
         count = 0
-        if isinstance(data, list):
-            patterns, embeddings = data, []
-        else:
-            patterns = data.get("patterns", [])
-            embeddings = data.get("embeddings", [])
-            self._sgd_classes = data.get("sgd_classes", [])
-            self._sgd_sample_count = data.get("sgd_sample_count", 0)
-
         for item in patterns:
             pid = item["pattern_id"]
             entry = ClassificationMemoryEntry(
@@ -660,18 +622,6 @@ class ClassificationMemory:
             for kw in entry.title_keywords:
                 self._keyword_index[kw.lower()].append(pid)
             count += 1
-
-        for item in embeddings:
-            emb = np.array(item["embedding"], dtype=np.float32)
-            compound = f"{item['document_type']}::{item['classification_label']}"
-            self._mem_embeddings.append(emb)
-            self._mem_doc_types.append(item["document_type"])
-            self._mem_class_labels.append(item["classification_label"])
-            self._mem_labels.append(compound)
-            count += 1
-
-        if self._mem_embeddings and self._sgd_classes:
-            self._retrain_sgd_from_store()
         return count
 
     def _find_exact_match(self, document_type, classification_label, filename):
@@ -680,7 +630,8 @@ class ClassificationMemory:
                 return pid
         return None
 
-    def _normalize_filename(self, filename: str) -> str:
+    @staticmethod
+    def _normalize_filename(filename: str) -> str:
         name = re.sub(r"\.[^.]+$", "", filename)
         return re.sub(r"[\s_-]+", " ", name.lower().strip())
 
@@ -689,6 +640,159 @@ class ClassificationMemory:
         to_remove = max(1, len(sorted_patterns) // 10)
         for pid, _ in sorted_patterns[:to_remove]:
             del self._patterns[pid]
+
+
+# ── Classification Memory (facade composing the three stores) ─────────
+
+class ClassificationMemory:
+    """Self-learning classification memory composing EmbeddingStore, SGDClassifierWrapper, PatternStore.
+
+    Delegates to focused sub-components for each responsibility:
+    - EmbeddingStore: pgvector/in-memory embedding storage + cosine lookup
+    - SGDClassifierWrapper: sklearn online learning
+    - PatternStore: keyword/filename pattern index
+    """
+
+    def __init__(self, embedding_dim: int = 768, use_db: Optional[bool] = None) -> None:
+        resolved_use_db = use_db if use_db is not None else _pgvector_available()
+        self._embeddings = EmbeddingStore(embedding_dim, resolved_use_db)
+        self._sgd = SGDClassifierWrapper()
+        self._patterns = PatternStore()
+        self._use_db = resolved_use_db
+
+    # ── Backward-compatible properties for test access ────────────────
+
+    @property
+    def _mem_embeddings(self) -> List[np.ndarray]:
+        return self._embeddings._mem_embeddings
+
+    @property
+    def _sgd_sample_count(self) -> int:
+        return self._sgd.sample_count
+
+    @property
+    def _sgd_fitted(self) -> bool:
+        return self._sgd.fitted
+
+    @property
+    def _sgd_classes(self) -> List[str]:
+        return self._sgd.classes
+
+    # ── Embedding operations ──────────────────────────────────────────
+
+    def store_embedding(
+        self,
+        embedding: np.ndarray,
+        document_type: str,
+        classification_label: str,
+        source_doc_id: Optional[str] = None,
+    ) -> None:
+        emb = self._embeddings.store(embedding, document_type, classification_label, source_doc_id)
+        if emb is not None:
+            compound = f"{document_type}::{classification_label}"
+            self._sgd.train_incremental(emb, compound, self._embeddings)
+
+    def lookup_by_embedding(
+        self,
+        query_embedding: np.ndarray,
+        threshold: float = EMBEDDING_SIMILARITY_THRESHOLD,
+    ) -> Optional[Tuple[str, str, float]]:
+        return self._embeddings.lookup(query_embedding, threshold)
+
+    def predict_sgd(self, query_embedding: np.ndarray) -> Optional[Tuple[str, str, float]]:
+        return self._sgd.predict(query_embedding)
+
+    def bootstrap_sgd_from_pgvector(self) -> int:
+        if not self._use_db:
+            return 0
+        rows = _pgvector_fetch_all()
+        if not rows:
+            return 0
+        self._embeddings.load_from_rows(rows)
+        for row in rows:
+            compound = f"{row['document_type']}::{row['classification_label']}"
+            if compound not in self._sgd._sgd_classes:
+                self._sgd._sgd_classes.append(compound)
+        if len(self._sgd._sgd_classes) >= 2:
+            self._sgd._retrain_from_store(self._embeddings)
+        else:
+            self._sgd._sgd_sample_count = self._embeddings.embedding_count
+        logger.info("Bootstrapped SGD from pgvector: %d embeddings", len(rows))
+        return len(rows)
+
+    # ── Pattern operations ────────────────────────────────────────────
+
+    def store_pattern(
+        self,
+        document_type: str,
+        classification_label: str,
+        filename: Optional[str] = None,
+        title_keywords: Optional[List[str]] = None,
+        structural_signals: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        return self._patterns.store(document_type, classification_label, filename, title_keywords, structural_signals)
+
+    def lookup(
+        self,
+        filename: Optional[str] = None,
+        title_keywords: Optional[List[str]] = None,
+        min_accuracy: float = MEMORY_TRUST_THRESHOLD,
+        min_observations: int = MEMORY_MIN_OBSERVATIONS,
+    ) -> Optional[ClassificationMemoryEntry]:
+        return self._patterns.lookup(filename, title_keywords, min_accuracy, min_observations)
+
+    def record_feedback(self, pattern_id: str, correct: bool) -> None:
+        self._patterns.record_feedback(pattern_id, correct)
+
+    def get_all_patterns(self) -> List[ClassificationMemoryEntry]:
+        return self._patterns.get_all()
+
+    # ── Stats / export / import ───────────────────────────────────────
+
+    def get_stats(self) -> Dict[str, Any]:
+        patterns = self._patterns.get_all()
+        trusted = [p for p in patterns if p.accuracy >= MEMORY_TRUST_THRESHOLD and p.total_count >= MEMORY_MIN_OBSERVATIONS]
+        pgvector_count = _pgvector_count() if self._use_db else 0
+        return {
+            "total_patterns": len(patterns),
+            "trusted_patterns": len(trusted),
+            "total_observations": sum(p.total_count for p in patterns),
+            "avg_accuracy": (sum(p.accuracy for p in patterns) / len(patterns) if patterns else 0.0),
+            "embedding_count": self._embeddings.embedding_count,
+            "pgvector_count": pgvector_count,
+            "vector_backend": "pgvector" if self._use_db else "in-memory",
+            "neo4j_enabled": _neo4j_available(),
+            "sgd_fitted": self._sgd.fitted,
+            "sgd_sample_count": self._sgd.sample_count,
+            "sgd_classes": self._sgd.classes,
+        }
+
+    def export_json(self) -> str:
+        data = {
+            "patterns": self._patterns.export_patterns(),
+            "embeddings": self._embeddings.export_embeddings(),
+            "sgd_classes": self._sgd._sgd_classes,
+            "sgd_sample_count": self._sgd.sample_count,
+        }
+        return json.dumps(data, indent=2)
+
+    def import_json(self, raw: str) -> int:
+        data = json.loads(raw)
+        count = 0
+        if isinstance(data, list):
+            patterns_data, embeddings_data = data, []
+        else:
+            patterns_data = data.get("patterns", [])
+            embeddings_data = data.get("embeddings", [])
+            self._sgd._sgd_classes = data.get("sgd_classes", [])
+            self._sgd._sgd_sample_count = data.get("sgd_sample_count", 0)
+
+        count += self._patterns.import_patterns(patterns_data)
+        count += self._embeddings.import_embeddings(embeddings_data)
+
+        if self._embeddings._mem_embeddings and self._sgd._sgd_classes:
+            self._sgd._retrain_from_store(self._embeddings)
+        return count
 
 
 # ── Singleton ─────────────────────────────────────────────────────────
@@ -727,7 +831,7 @@ def _node_compute_embedding(state: ClassificationState, embedder) -> dict:
     if not text or embedder is None:
         return {"embedding": None}
     try:
-        sample = text[:2000]
+        sample = text[:FRONT_MATTER_EMBED_LIMIT]
         vec = embedder.embed_text(sample)
         return {"embedding": np.array(vec, dtype=np.float32)}
     except Exception as exc:
@@ -743,8 +847,8 @@ def _node_deterministic(state: ClassificationState) -> dict:
 
     for pattern, doc_type, label in _FILENAME_PATTERNS:
         if pattern.search(filename):
-            if best is None or 0.80 > best[2]:
-                best = (doc_type, label, 0.80)
+            if best is None or FILENAME_MATCH_CONFIDENCE > best[2]:
+                best = (doc_type, label, FILENAME_MATCH_CONFIDENCE)
 
     if text:
         for pattern, doc_type, label, weight in _CONTENT_SIGNALS:
@@ -752,7 +856,7 @@ def _node_deterministic(state: ClassificationState) -> dict:
                 if best is None or weight > best[2]:
                     best = (doc_type, label, weight)
 
-    if best and best[2] >= 0.85:
+    if best and best[2] >= DETERMINISTIC_RESOLVE_THRESHOLD:
         return {
             "det_result": best,
             "result": ClassificationResult(
@@ -798,7 +902,7 @@ def _node_sgd_classifier(state: ClassificationState, memory: ClassificationMemor
         return {"result": None, "method": ""}
 
     sgd_result = memory.predict_sgd(embedding)
-    if sgd_result and sgd_result[2] >= 0.6:
+    if sgd_result and sgd_result[2] >= SGD_PREDICT_THRESHOLD:
         doc_type, label, confidence = sgd_result
         return {
             "result": ClassificationResult(
@@ -824,7 +928,7 @@ def _node_llm_classify(state: ClassificationState, gateway: Optional[ModelGatewa
     messages = CLASSIFICATION_PROMPT.format_messages(
         filename=state["filename"],
         page_count=state["page_count"],
-        front_matter_text=text[:4000],
+        front_matter_text=text[:FRONT_MATTER_LLM_LIMIT],
     )
 
     # Convert LangChain messages to gateway format
@@ -898,7 +1002,7 @@ def _parse_llm_response(response: str) -> Optional[Tuple[str, str, float]]:
         doc_type = data.get("document_type", "unknown")
         label = data.get("classification_label", "unclassified")
         confidence = float(data.get("confidence", 0.5))
-        return (doc_type, label, min(confidence, 0.95))
+        return (doc_type, label, min(confidence, LLM_CONFIDENCE_CAP))
     except (json.JSONDecodeError, ValueError, AttributeError) as exc:
         logger.warning("Failed to parse LLM classification response: %s", exc)
         return None

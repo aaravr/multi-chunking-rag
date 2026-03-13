@@ -433,9 +433,9 @@ class AgentRunner:
             auto_offset_reset="earliest",
             enable_auto_commit=False,  # Manual commit for at-least-once
             max_poll_records=max_poll_records,
-            session_timeout_ms=settings.kafka_session_timeout_ms,
-            heartbeat_interval_ms=settings.kafka_heartbeat_interval_ms,
-            fetch_min_bytes=settings.kafka_fetch_min_bytes,
+            session_timeout_ms=settings.kafka.session_timeout_ms,
+            heartbeat_interval_ms=settings.kafka.heartbeat_interval_ms,
+            fetch_min_bytes=settings.kafka.fetch_min_bytes,
             **security,
         )
 
@@ -443,11 +443,11 @@ class AgentRunner:
         self._producer = KafkaProducer(
             bootstrap_servers=brokers,
             value_serializer=lambda v: v,
-            acks=settings.kafka_acks,
-            retries=settings.kafka_producer_retries,
-            compression_type=settings.kafka_compression_type,
-            linger_ms=settings.kafka_linger_ms,
-            batch_size=settings.kafka_batch_size,
+            acks=settings.kafka.acks,
+            retries=settings.kafka.producer_retries,
+            compression_type=settings.kafka.compression_type,
+            linger_ms=settings.kafka.linger_ms,
+            batch_size=settings.kafka.batch_size,
             **security,
         )
 
@@ -486,7 +486,7 @@ class AgentRunner:
             bootstrap_servers,
             enable_idempotency,
             enable_dlq,
-            settings.kafka_compression_type,
+            settings.kafka.compression_type,
         )
 
     @property
@@ -550,22 +550,22 @@ def _build_security_config() -> Dict[str, Any]:
     from core.config import settings
 
     config: Dict[str, Any] = {}
-    protocol = settings.kafka_security_protocol
+    protocol = settings.kafka.security_protocol
 
     if protocol != "PLAINTEXT":
         config["security_protocol"] = protocol
 
-    if settings.kafka_sasl_mechanism:
-        config["sasl_mechanism"] = settings.kafka_sasl_mechanism
-        config["sasl_plain_username"] = settings.kafka_sasl_username
-        config["sasl_plain_password"] = settings.kafka_sasl_password
+    if settings.kafka.sasl_mechanism:
+        config["sasl_mechanism"] = settings.kafka.sasl_mechanism
+        config["sasl_plain_username"] = settings.kafka.sasl_username
+        config["sasl_plain_password"] = settings.kafka.sasl_password
 
-    if settings.kafka_ssl_cafile:
-        config["ssl_cafile"] = settings.kafka_ssl_cafile
-    if settings.kafka_ssl_certfile:
-        config["ssl_certfile"] = settings.kafka_ssl_certfile
-    if settings.kafka_ssl_keyfile:
-        config["ssl_keyfile"] = settings.kafka_ssl_keyfile
+    if settings.kafka.ssl_cafile:
+        config["ssl_cafile"] = settings.kafka.ssl_cafile
+    if settings.kafka.ssl_certfile:
+        config["ssl_certfile"] = settings.kafka.ssl_certfile
+    if settings.kafka.ssl_keyfile:
+        config["ssl_keyfile"] = settings.kafka.ssl_keyfile
 
     return config
 
@@ -631,16 +631,16 @@ def main() -> None:
     from core.config import settings
 
     # Initialise OTel if enabled
-    if settings.enable_otel:
+    if settings.otel.enabled:
         from agents.otel_provider import init_otel
         init_otel(
             service_name=f"idp-{args.agent}",
-            endpoint=settings.otel_exporter_endpoint,
-            sample_rate=settings.otel_sample_rate,
-            console_export=settings.otel_export_console,
+            endpoint=settings.otel.exporter_endpoint,
+            sample_rate=settings.otel.sample_rate,
+            console_export=settings.otel.export_console,
         )
 
-    bootstrap = args.bootstrap_servers or settings.kafka_bootstrap_servers
+    bootstrap = args.bootstrap_servers or settings.kafka.bootstrap_servers
     if not bootstrap:
         logger.error("KAFKA_BOOTSTRAP_SERVERS not set")
         sys.exit(1)
@@ -650,10 +650,10 @@ def main() -> None:
         agent_name=args.agent,
         handler=handler,
         bootstrap_servers=bootstrap,
-        enable_idempotency=settings.kafka_enable_idempotency,
-        enable_dlq=settings.kafka_enable_dlq,
-        idempotency_ttl_s=settings.kafka_idempotency_ttl_s,
-        idempotency_max_entries=settings.kafka_idempotency_max_entries,
+        enable_idempotency=settings.kafka.enable_idempotency,
+        enable_dlq=settings.kafka.enable_dlq,
+        idempotency_ttl_s=settings.kafka.idempotency_ttl_s,
+        idempotency_max_entries=settings.kafka.idempotency_max_entries,
     )
 
     # Graceful shutdown on SIGTERM/SIGINT

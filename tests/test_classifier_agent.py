@@ -19,6 +19,9 @@ import pytest
 from agents.classifier_agent import (
     ClassificationMemory,
     ClassifierAgent,
+    EmbeddingStore,
+    PatternStore,
+    SGDClassifierWrapper,
     EMBEDDING_SIMILARITY_THRESHOLD,
     MEMORY_MIN_OBSERVATIONS,
     MEMORY_TRUST_THRESHOLD,
@@ -512,6 +515,6 @@ class TestBackendSelection:
         """When DATABASE_URL is empty, should default to in-memory."""
         with patch("agents.classifier_agent.settings") as mock_settings:
             mock_settings.database_url = ""
-            mock_settings.enable_neo4j = False
+            mock_settings.neo4j.enabled = False
             memory = ClassificationMemory(embedding_dim=4)
             assert memory._use_db is False

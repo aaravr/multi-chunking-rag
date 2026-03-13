@@ -10,6 +10,63 @@ def _get_bool_env(name: str, default: bool = False) -> bool:
 
 
 @dataclass
+class KafkaSettings:
+    """Kafka A2A configuration (§5, §8)."""
+    enabled: bool = _get_bool_env("ENABLE_KAFKA_BUS", False)
+    bootstrap_servers: str = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+    request_timeout_ms: int = int(os.getenv("KAFKA_REQUEST_TIMEOUT_MS", "30000"))
+    # Producer tuning
+    compression_type: str = os.getenv("KAFKA_COMPRESSION_TYPE", "lz4")
+    linger_ms: int = int(os.getenv("KAFKA_LINGER_MS", "5"))
+    batch_size: int = int(os.getenv("KAFKA_BATCH_SIZE", "16384"))
+    acks: str = os.getenv("KAFKA_ACKS", "all")
+    producer_retries: int = int(os.getenv("KAFKA_PRODUCER_RETRIES", "5"))
+    # Consumer tuning
+    max_poll_records: int = int(os.getenv("KAFKA_MAX_POLL_RECORDS", "10"))
+    session_timeout_ms: int = int(os.getenv("KAFKA_SESSION_TIMEOUT_MS", "30000"))
+    heartbeat_interval_ms: int = int(os.getenv("KAFKA_HEARTBEAT_INTERVAL_MS", "10000"))
+    fetch_min_bytes: int = int(os.getenv("KAFKA_FETCH_MIN_BYTES", "1"))
+    # Resilience
+    circuit_breaker_threshold: int = int(os.getenv("KAFKA_CIRCUIT_BREAKER_THRESHOLD", "5"))
+    circuit_breaker_cooldown_s: float = float(os.getenv("KAFKA_CIRCUIT_BREAKER_COOLDOWN_S", "60"))
+    retry_max_attempts: int = int(os.getenv("KAFKA_RETRY_MAX_ATTEMPTS", "3"))
+    retry_base_delay_s: float = float(os.getenv("KAFKA_RETRY_BASE_DELAY_S", "1.0"))
+    retry_max_delay_s: float = float(os.getenv("KAFKA_RETRY_MAX_DELAY_S", "30.0"))
+    enable_dlq: bool = _get_bool_env("KAFKA_ENABLE_DLQ", True)
+    enable_idempotency: bool = _get_bool_env("KAFKA_ENABLE_IDEMPOTENCY", True)
+    idempotency_ttl_s: float = float(os.getenv("KAFKA_IDEMPOTENCY_TTL_S", "300"))
+    idempotency_max_entries: int = int(os.getenv("KAFKA_IDEMPOTENCY_MAX_ENTRIES", "50000"))
+    # Security (SASL/TLS)
+    security_protocol: str = os.getenv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT")
+    sasl_mechanism: str = os.getenv("KAFKA_SASL_MECHANISM", "")
+    sasl_username: str = os.getenv("KAFKA_SASL_USERNAME", "")
+    sasl_password: str = os.getenv("KAFKA_SASL_PASSWORD", "")
+    ssl_cafile: str = os.getenv("KAFKA_SSL_CAFILE", "")
+    ssl_certfile: str = os.getenv("KAFKA_SSL_CERTFILE", "")
+    ssl_keyfile: str = os.getenv("KAFKA_SSL_KEYFILE", "")
+
+
+@dataclass
+class OtelSettings:
+    """OpenTelemetry configuration (§5, §8)."""
+    enabled: bool = _get_bool_env("ENABLE_OTEL", False)
+    exporter_endpoint: str = os.getenv("OTEL_EXPORTER_ENDPOINT", "localhost:4317")
+    service_name: str = os.getenv("OTEL_SERVICE_NAME", "idp-agent")
+    sample_rate: float = float(os.getenv("OTEL_SAMPLE_RATE", "1.0"))
+    export_console: bool = _get_bool_env("OTEL_EXPORT_CONSOLE", False)
+
+
+@dataclass
+class Neo4jSettings:
+    """Neo4j Knowledge Graph configuration (§6.4)."""
+    enabled: bool = _get_bool_env("ENABLE_NEO4J", False)
+    uri: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+    user: str = os.getenv("NEO4J_USER", "neo4j")
+    password: str = os.getenv("NEO4J_PASSWORD", "neo4jpassword")
+    database: str = os.getenv("NEO4J_DATABASE", "neo4j")
+
+
+@dataclass
 class Settings:
     database_url: str = os.getenv("DATABASE_URL", "")
     db_pool_size: int = int(os.getenv("DB_POOL_SIZE", "5"))
@@ -30,54 +87,21 @@ class Settings:
     enable_redis_working_memory: bool = _get_bool_env("ENABLE_REDIS_WORKING_MEMORY", True)
     redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     redis_working_memory_ttl: int = int(os.getenv("REDIS_WORKING_MEMORY_TTL", "900"))
-    # ── Kafka A2A (§5, §8) ───────────────────────────────────────────
-    enable_kafka_bus: bool = _get_bool_env("ENABLE_KAFKA_BUS", False)
-    kafka_bootstrap_servers: str = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
-    kafka_request_timeout_ms: int = int(os.getenv("KAFKA_REQUEST_TIMEOUT_MS", "30000"))
-    # Producer tuning
-    kafka_compression_type: str = os.getenv("KAFKA_COMPRESSION_TYPE", "lz4")
-    kafka_linger_ms: int = int(os.getenv("KAFKA_LINGER_MS", "5"))
-    kafka_batch_size: int = int(os.getenv("KAFKA_BATCH_SIZE", "16384"))
-    kafka_acks: str = os.getenv("KAFKA_ACKS", "all")
-    kafka_producer_retries: int = int(os.getenv("KAFKA_PRODUCER_RETRIES", "5"))
-    # Consumer tuning
-    kafka_max_poll_records: int = int(os.getenv("KAFKA_MAX_POLL_RECORDS", "10"))
-    kafka_session_timeout_ms: int = int(os.getenv("KAFKA_SESSION_TIMEOUT_MS", "30000"))
-    kafka_heartbeat_interval_ms: int = int(os.getenv("KAFKA_HEARTBEAT_INTERVAL_MS", "10000"))
-    kafka_fetch_min_bytes: int = int(os.getenv("KAFKA_FETCH_MIN_BYTES", "1"))
-    # Resilience
-    kafka_circuit_breaker_threshold: int = int(os.getenv("KAFKA_CIRCUIT_BREAKER_THRESHOLD", "5"))
-    kafka_circuit_breaker_cooldown_s: float = float(os.getenv("KAFKA_CIRCUIT_BREAKER_COOLDOWN_S", "60"))
-    kafka_retry_max_attempts: int = int(os.getenv("KAFKA_RETRY_MAX_ATTEMPTS", "3"))
-    kafka_retry_base_delay_s: float = float(os.getenv("KAFKA_RETRY_BASE_DELAY_S", "1.0"))
-    kafka_retry_max_delay_s: float = float(os.getenv("KAFKA_RETRY_MAX_DELAY_S", "30.0"))
-    kafka_enable_dlq: bool = _get_bool_env("KAFKA_ENABLE_DLQ", True)
-    kafka_enable_idempotency: bool = _get_bool_env("KAFKA_ENABLE_IDEMPOTENCY", True)
-    kafka_idempotency_ttl_s: float = float(os.getenv("KAFKA_IDEMPOTENCY_TTL_S", "300"))
-    kafka_idempotency_max_entries: int = int(os.getenv("KAFKA_IDEMPOTENCY_MAX_ENTRIES", "50000"))
-    # Security (SASL/TLS)
-    kafka_security_protocol: str = os.getenv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT")
-    kafka_sasl_mechanism: str = os.getenv("KAFKA_SASL_MECHANISM", "")
-    kafka_sasl_username: str = os.getenv("KAFKA_SASL_USERNAME", "")
-    kafka_sasl_password: str = os.getenv("KAFKA_SASL_PASSWORD", "")
-    kafka_ssl_cafile: str = os.getenv("KAFKA_SSL_CAFILE", "")
-    kafka_ssl_certfile: str = os.getenv("KAFKA_SSL_CERTFILE", "")
-    kafka_ssl_keyfile: str = os.getenv("KAFKA_SSL_KEYFILE", "")
-    # ── OpenTelemetry (§5, §8) ─────────────────────────────────────────
-    enable_otel: bool = _get_bool_env("ENABLE_OTEL", False)
-    otel_exporter_endpoint: str = os.getenv("OTEL_EXPORTER_ENDPOINT", "localhost:4317")
-    otel_service_name: str = os.getenv("OTEL_SERVICE_NAME", "idp-agent")
-    otel_sample_rate: float = float(os.getenv("OTEL_SAMPLE_RATE", "1.0"))
-    otel_export_console: bool = _get_bool_env("OTEL_EXPORT_CONSOLE", False)
+    # ── Sub-configs ──────────────────────────────────────────────────────
+    kafka: KafkaSettings = None  # type: ignore[assignment]
+    otel: OtelSettings = None  # type: ignore[assignment]
+    neo4j: Neo4jSettings = None  # type: ignore[assignment]
     # ── Agent Evaluation ───────────────────────────────────────────────
     enable_agent_eval: bool = _get_bool_env("ENABLE_AGENT_EVAL", False)
     agent_eval_log_dir: str = os.getenv("AGENT_EVAL_LOG_DIR", "eval_logs")
-    # ── Neo4j Knowledge Graph (§6.4) ─────────────────────────────────
-    enable_neo4j: bool = _get_bool_env("ENABLE_NEO4J", False)
-    neo4j_uri: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-    neo4j_user: str = os.getenv("NEO4J_USER", "neo4j")
-    neo4j_password: str = os.getenv("NEO4J_PASSWORD", "neo4jpassword")
-    neo4j_database: str = os.getenv("NEO4J_DATABASE", "neo4j")
+
+    def __post_init__(self):
+        if self.kafka is None:
+            self.kafka = KafkaSettings()
+        if self.otel is None:
+            self.otel = OtelSettings()
+        if self.neo4j is None:
+            self.neo4j = Neo4jSettings()
 
 
 settings = Settings()

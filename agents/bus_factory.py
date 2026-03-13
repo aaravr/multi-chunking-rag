@@ -36,20 +36,20 @@ def get_bus(caller_agent: str = "orchestrator") -> AnyBus:
 
     from core.config import settings
 
-    if settings.enable_kafka_bus and settings.kafka_bootstrap_servers:
+    if settings.kafka.enabled and settings.kafka.bootstrap_servers:
         try:
             from agents.kafka_bus import KafkaBus
 
             _singleton = KafkaBus(
-                bootstrap_servers=settings.kafka_bootstrap_servers,
+                bootstrap_servers=settings.kafka.bootstrap_servers,
                 caller_agent=caller_agent,
-                request_timeout_ms=settings.kafka_request_timeout_ms,
+                request_timeout_ms=settings.kafka.request_timeout_ms,
             )
             logger.info(
                 "Bus: KafkaBus (Kafka A2A, compression=%s, dlq=%s, idempotency=%s)",
-                settings.kafka_compression_type,
-                settings.kafka_enable_dlq,
-                settings.kafka_enable_idempotency,
+                settings.kafka.compression_type,
+                settings.kafka.enable_dlq,
+                settings.kafka.enable_idempotency,
             )
         except Exception:
             logger.warning(

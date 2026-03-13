@@ -6,205 +6,36 @@ from core.contracts import RetrievedChunk
 from embedding.model_registry import get_embedding_model
 from storage.db import get_connection
 
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+DEFAULT_PAGE_WINDOW: int = 2
 
-def search(
-    doc_id: str,
-    query: str,
-    top_k: int = 3,
-) -> List[RetrievedChunk]:
-    embedder = get_embedding_model()
-    query_embedding = embedder.embed_text(query)
-    with get_connection() as conn:
-        register_vector(conn)
-        with conn.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT chunk_id,
-                       doc_id,
-                       page_numbers,
-                       macro_id,
-                       child_id,
-                       chunk_type,
-                       text_content,
-                       char_start,
-                       char_end,
-                       polygons,
-                       source_type,
-                       heading_path,
-                       section_id,
-                       1 - (embedding <=> %s::vector) AS score
-                FROM chunks
-                WHERE doc_id = %s
-                ORDER BY embedding <=> %s::vector
-                LIMIT %s
-                """,
-                (query_embedding, doc_id, query_embedding, top_k),
-            )
-            rows = cursor.fetchall()
-    results: List[RetrievedChunk] = []
-    for row in rows:
-        results.append(
-            RetrievedChunk(
-                chunk_id=str(row[0]),
-                doc_id=str(row[1]),
-                page_numbers=list(row[2] or []),
-                macro_id=int(row[3] or 0),
-                child_id=int(row[4] or 0),
-                chunk_type=row[5] or "narrative",
-                text_content=row[6],
-                char_start=int(row[7]),
-                char_end=int(row[8]),
-                polygons=list(row[9] or []),
-                source_type=row[10],
-                heading_path=row[11],
-                section_id=row[12],
-                score=float(row[13]),
-            )
-        )
-    return results
+# Column list shared by every query — keeps SELECT clauses in one place.
+_CHUNK_COLUMNS = """
+    chunk_id,
+    doc_id,
+    page_numbers,
+    macro_id,
+    child_id,
+    chunk_type,
+    text_content,
+    char_start,
+    char_end,
+    polygons,
+    source_type,
+    heading_path,
+    section_id"""
 
 
-def search_on_pages(
-    doc_id: str,
-    query: str,
-    page_numbers: List[int],
-    top_k: int = 3,
-) -> List[RetrievedChunk]:
-    if not page_numbers:
-        return []
-    embedder = get_embedding_model()
-    query_embedding = embedder.embed_text(query)
-    with get_connection() as conn:
-        register_vector(conn)
-        with conn.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT chunk_id,
-                       doc_id,
-                       page_numbers,
-                       macro_id,
-                       child_id,
-                       chunk_type,
-                       text_content,
-                       char_start,
-                       char_end,
-                       polygons,
-                       source_type,
-                       heading_path,
-                       section_id,
-                       1 - (embedding <=> %s::vector) AS score
-                FROM chunks
-                WHERE doc_id = %s
-                  AND page_numbers && %s
-                ORDER BY embedding <=> %s::vector
-                LIMIT %s
-                """,
-                (query_embedding, doc_id, page_numbers, query_embedding, top_k),
-            )
-            rows = cursor.fetchall()
-    return _rows_to_chunks(rows)
-
-
-def fetch_by_section(
-    doc_id: str,
-    heading_path: Optional[str],
-    section_id: Optional[str],
-) -> List[RetrievedChunk]:
-    if not heading_path and not section_id:
-        return []
-    with get_connection() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT chunk_id,
-                       doc_id,
-                       page_numbers,
-                       macro_id,
-                       child_id,
-                       chunk_type,
-                       text_content,
-                       char_start,
-                       char_end,
-                       polygons,
-                       source_type,
-                       heading_path,
-                       section_id,
-                       0.0 AS score
-                FROM chunks
-                WHERE doc_id = %s
-                  AND (heading_path = %s OR section_id = %s)
-                ORDER BY page_numbers[1] NULLS LAST, macro_id, child_id, char_start
-                """,
-                (doc_id, heading_path, section_id),
-            )
-            rows = cursor.fetchall()
-    return _rows_to_chunks(rows)
-
-
-def fetch_by_page_window(
-    doc_id: str, anchor_pages: List[int], window: int = 2
-) -> List[RetrievedChunk]:
-    if not anchor_pages:
-        return []
-    start = max(min(anchor_pages) - window, 1)
-    end = max(anchor_pages) + window
-    pages = list(range(start, end + 1))
-    with get_connection() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT chunk_id,
-                       doc_id,
-                       page_numbers,
-                       macro_id,
-                       child_id,
-                       chunk_type,
-                       text_content,
-                       char_start,
-                       char_end,
-                       polygons,
-                       source_type,
-                       heading_path,
-                       section_id,
-                       0.0 AS score
-                FROM chunks
-                WHERE doc_id = %s
-                  AND page_numbers && %s
-                ORDER BY page_numbers[1] NULLS LAST, macro_id, child_id, char_start
-                """,
-                (doc_id, pages),
-            )
-            rows = cursor.fetchall()
-    return _rows_to_chunks(rows)
-
-
-def fetch_by_macro_id(doc_id: str, macro_id: int) -> List[RetrievedChunk]:
-    with get_connection() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT chunk_id,
-                       doc_id,
-                       page_numbers,
-                       macro_id,
-                       child_id,
-                       chunk_type,
-                       text_content,
-                       char_start,
-                       char_end,
-                       polygons,
-                       source_type,
-                       heading_path,
-                       section_id,
-                       0.0 AS score
-                FROM chunks
-                WHERE doc_id = %s
-                  AND macro_id = %s
-                ORDER BY page_numbers[1] NULLS LAST, macro_id, child_id, char_start
-                """,
-                (doc_id, macro_id),
-            )
-            rows = cursor.fetchall()
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+def _execute_search_query(conn, sql: str, params: tuple) -> List[RetrievedChunk]:
+    """Run *sql* with *params* on *conn* and return mapped RetrievedChunk list."""
+    with conn.cursor() as cursor:
+        cursor.execute(sql, params)
+        rows = cursor.fetchall()
     return _rows_to_chunks(rows)
 
 
@@ -230,3 +61,106 @@ def _rows_to_chunks(rows) -> List[RetrievedChunk]:
             )
         )
     return results
+
+
+# ---------------------------------------------------------------------------
+# Public API  (signatures unchanged)
+# ---------------------------------------------------------------------------
+def search(
+    doc_id: str,
+    query: str,
+    top_k: int = 3,
+) -> List[RetrievedChunk]:
+    embedder = get_embedding_model()
+    query_embedding = embedder.embed_text(query)
+    sql = f"""
+        SELECT {_CHUNK_COLUMNS},
+               1 - (embedding <=> %s::vector) AS score
+        FROM chunks
+        WHERE doc_id = %s
+        ORDER BY embedding <=> %s::vector
+        LIMIT %s
+    """
+    with get_connection() as conn:
+        register_vector(conn)
+        return _execute_search_query(
+            conn, sql, (query_embedding, doc_id, query_embedding, top_k)
+        )
+
+
+def search_on_pages(
+    doc_id: str,
+    query: str,
+    page_numbers: List[int],
+    top_k: int = 3,
+) -> List[RetrievedChunk]:
+    if not page_numbers:
+        return []
+    embedder = get_embedding_model()
+    query_embedding = embedder.embed_text(query)
+    sql = f"""
+        SELECT {_CHUNK_COLUMNS},
+               1 - (embedding <=> %s::vector) AS score
+        FROM chunks
+        WHERE doc_id = %s
+          AND page_numbers && %s
+        ORDER BY embedding <=> %s::vector
+        LIMIT %s
+    """
+    with get_connection() as conn:
+        register_vector(conn)
+        return _execute_search_query(
+            conn, sql, (query_embedding, doc_id, page_numbers, query_embedding, top_k)
+        )
+
+
+def fetch_by_section(
+    doc_id: str,
+    heading_path: Optional[str],
+    section_id: Optional[str],
+) -> List[RetrievedChunk]:
+    if not heading_path and not section_id:
+        return []
+    sql = f"""
+        SELECT {_CHUNK_COLUMNS},
+               0.0 AS score
+        FROM chunks
+        WHERE doc_id = %s
+          AND (heading_path = %s OR section_id = %s)
+        ORDER BY page_numbers[1] NULLS LAST, macro_id, child_id, char_start
+    """
+    with get_connection() as conn:
+        return _execute_search_query(conn, sql, (doc_id, heading_path, section_id))
+
+
+def fetch_by_page_window(
+    doc_id: str, anchor_pages: List[int], window: int = DEFAULT_PAGE_WINDOW
+) -> List[RetrievedChunk]:
+    if not anchor_pages:
+        return []
+    start = max(min(anchor_pages) - window, 1)
+    end = max(anchor_pages) + window
+    pages = list(range(start, end + 1))
+    sql = f"""
+        SELECT {_CHUNK_COLUMNS},
+               0.0 AS score
+        FROM chunks
+        WHERE doc_id = %s
+          AND page_numbers && %s
+        ORDER BY page_numbers[1] NULLS LAST, macro_id, child_id, char_start
+    """
+    with get_connection() as conn:
+        return _execute_search_query(conn, sql, (doc_id, pages))
+
+
+def fetch_by_macro_id(doc_id: str, macro_id: int) -> List[RetrievedChunk]:
+    sql = f"""
+        SELECT {_CHUNK_COLUMNS},
+               0.0 AS score
+        FROM chunks
+        WHERE doc_id = %s
+          AND macro_id = %s
+        ORDER BY page_numbers[1] NULLS LAST, macro_id, child_id, char_start
+    """
+    with get_connection() as conn:
+        return _execute_search_query(conn, sql, (doc_id, macro_id))

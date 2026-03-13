@@ -91,22 +91,22 @@ def _build_security_config() -> Dict[str, Any]:
     from core.config import settings
 
     config: Dict[str, Any] = {}
-    protocol = settings.kafka_security_protocol
+    protocol = settings.kafka.security_protocol
 
     if protocol != "PLAINTEXT":
         config["security_protocol"] = protocol
 
-    if settings.kafka_sasl_mechanism:
-        config["sasl_mechanism"] = settings.kafka_sasl_mechanism
-        config["sasl_plain_username"] = settings.kafka_sasl_username
-        config["sasl_plain_password"] = settings.kafka_sasl_password
+    if settings.kafka.sasl_mechanism:
+        config["sasl_mechanism"] = settings.kafka.sasl_mechanism
+        config["sasl_plain_username"] = settings.kafka.sasl_username
+        config["sasl_plain_password"] = settings.kafka.sasl_password
 
-    if settings.kafka_ssl_cafile:
-        config["ssl_cafile"] = settings.kafka_ssl_cafile
-    if settings.kafka_ssl_certfile:
-        config["ssl_certfile"] = settings.kafka_ssl_certfile
-    if settings.kafka_ssl_keyfile:
-        config["ssl_keyfile"] = settings.kafka_ssl_keyfile
+    if settings.kafka.ssl_cafile:
+        config["ssl_cafile"] = settings.kafka.ssl_cafile
+    if settings.kafka.ssl_certfile:
+        config["ssl_certfile"] = settings.kafka.ssl_certfile
+    if settings.kafka.ssl_keyfile:
+        config["ssl_keyfile"] = settings.kafka.ssl_keyfile
 
     return config
 
@@ -161,9 +161,9 @@ class KafkaBus:
 
         # Retry policy
         self._retry_policy = RetryPolicy(
-            max_retries=settings.kafka_retry_max_attempts,
-            base_delay_s=settings.kafka_retry_base_delay_s,
-            max_delay_s=settings.kafka_retry_max_delay_s,
+            max_retries=settings.kafka.retry_max_attempts,
+            base_delay_s=settings.kafka.retry_base_delay_s,
+            max_delay_s=settings.kafka.retry_max_delay_s,
         )
 
         # Security config
@@ -174,11 +174,11 @@ class KafkaBus:
         self._producer = KafkaProducer(
             bootstrap_servers=brokers,
             value_serializer=lambda v: v,
-            acks=settings.kafka_acks,
-            retries=settings.kafka_producer_retries,
-            compression_type=settings.kafka_compression_type,
-            linger_ms=settings.kafka_linger_ms,
-            batch_size=settings.kafka_batch_size,
+            acks=settings.kafka.acks,
+            retries=settings.kafka.producer_retries,
+            compression_type=settings.kafka.compression_type,
+            linger_ms=settings.kafka.linger_ms,
+            batch_size=settings.kafka.batch_size,
             **security,
         )
 
@@ -192,9 +192,9 @@ class KafkaBus:
             auto_offset_reset="latest",
             enable_auto_commit=True,
             consumer_timeout_ms=1000,
-            session_timeout_ms=settings.kafka_session_timeout_ms,
-            heartbeat_interval_ms=settings.kafka_heartbeat_interval_ms,
-            fetch_min_bytes=settings.kafka_fetch_min_bytes,
+            session_timeout_ms=settings.kafka.session_timeout_ms,
+            heartbeat_interval_ms=settings.kafka.heartbeat_interval_ms,
+            fetch_min_bytes=settings.kafka.fetch_min_bytes,
             **security,
         )
 
@@ -207,7 +207,7 @@ class KafkaBus:
             "KafkaBus: connected to %s, reply_topic=%s, compression=%s",
             bootstrap_servers,
             self._reply_topic,
-            settings.kafka_compression_type,
+            settings.kafka.compression_type,
         )
 
     def _get_circuit_breaker(self, agent_name: str) -> CircuitBreaker:
@@ -216,8 +216,8 @@ class KafkaBus:
             if agent_name not in self._circuit_breakers:
                 self._circuit_breakers[agent_name] = CircuitBreaker(
                     agent_name=agent_name,
-                    failure_threshold=self._settings.kafka_circuit_breaker_threshold,
-                    cooldown_s=self._settings.kafka_circuit_breaker_cooldown_s,
+                    failure_threshold=self._settings.kafka.circuit_breaker_threshold,
+                    cooldown_s=self._settings.kafka.circuit_breaker_cooldown_s,
                 )
             return self._circuit_breakers[agent_name]
 

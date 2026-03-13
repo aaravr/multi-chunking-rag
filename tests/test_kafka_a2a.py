@@ -974,45 +974,48 @@ class TestBusFactory:
 
     def test_default_returns_message_bus(self):
         with patch("core.config.settings") as mock_settings:
-            mock_settings.enable_kafka_bus = False
-            mock_settings.kafka_bootstrap_servers = ""
+            mock_settings.kafka = MagicMock()
+            mock_settings.kafka.enabled = False
+            mock_settings.kafka.bootstrap_servers = ""
             bus = get_bus()
             assert isinstance(bus, MessageBus)
 
     def test_kafka_unavailable_falls_back(self):
         with patch("core.config.settings") as mock_settings:
-            mock_settings.enable_kafka_bus = True
-            mock_settings.kafka_bootstrap_servers = "nonexistent:9092"
-            mock_settings.kafka_request_timeout_ms = 1000
-            mock_settings.kafka_compression_type = "none"
-            mock_settings.kafka_linger_ms = 0
-            mock_settings.kafka_batch_size = 16384
-            mock_settings.kafka_acks = "all"
-            mock_settings.kafka_producer_retries = 3
-            mock_settings.kafka_session_timeout_ms = 30000
-            mock_settings.kafka_heartbeat_interval_ms = 10000
-            mock_settings.kafka_fetch_min_bytes = 1
-            mock_settings.kafka_circuit_breaker_threshold = 5
-            mock_settings.kafka_circuit_breaker_cooldown_s = 60
-            mock_settings.kafka_retry_max_attempts = 3
-            mock_settings.kafka_retry_base_delay_s = 1.0
-            mock_settings.kafka_retry_max_delay_s = 30.0
-            mock_settings.kafka_security_protocol = "PLAINTEXT"
-            mock_settings.kafka_sasl_mechanism = ""
-            mock_settings.kafka_sasl_username = ""
-            mock_settings.kafka_sasl_password = ""
-            mock_settings.kafka_ssl_cafile = ""
-            mock_settings.kafka_ssl_certfile = ""
-            mock_settings.kafka_ssl_keyfile = ""
-            mock_settings.kafka_enable_dlq = True
-            mock_settings.kafka_enable_idempotency = True
+            mock_settings.kafka = MagicMock()
+            mock_settings.kafka.enabled = True
+            mock_settings.kafka.bootstrap_servers = "nonexistent:9092"
+            mock_settings.kafka.request_timeout_ms = 1000
+            mock_settings.kafka.compression_type = "none"
+            mock_settings.kafka.linger_ms = 0
+            mock_settings.kafka.batch_size = 16384
+            mock_settings.kafka.acks = "all"
+            mock_settings.kafka.producer_retries = 3
+            mock_settings.kafka.session_timeout_ms = 30000
+            mock_settings.kafka.heartbeat_interval_ms = 10000
+            mock_settings.kafka.fetch_min_bytes = 1
+            mock_settings.kafka.circuit_breaker_threshold = 5
+            mock_settings.kafka.circuit_breaker_cooldown_s = 60
+            mock_settings.kafka.retry_max_attempts = 3
+            mock_settings.kafka.retry_base_delay_s = 1.0
+            mock_settings.kafka.retry_max_delay_s = 30.0
+            mock_settings.kafka.security_protocol = "PLAINTEXT"
+            mock_settings.kafka.sasl_mechanism = ""
+            mock_settings.kafka.sasl_username = ""
+            mock_settings.kafka.sasl_password = ""
+            mock_settings.kafka.ssl_cafile = ""
+            mock_settings.kafka.ssl_certfile = ""
+            mock_settings.kafka.ssl_keyfile = ""
+            mock_settings.kafka.enable_dlq = True
+            mock_settings.kafka.enable_idempotency = True
             bus = get_bus()
             assert isinstance(bus, MessageBus)
 
     def test_singleton_returns_same_instance(self):
         with patch("core.config.settings") as mock_settings:
-            mock_settings.enable_kafka_bus = False
-            mock_settings.kafka_bootstrap_servers = ""
+            mock_settings.kafka = MagicMock()
+            mock_settings.kafka.enabled = False
+            mock_settings.kafka.bootstrap_servers = ""
             bus1 = get_bus()
             bus2 = get_bus()
             assert bus1 is bus2

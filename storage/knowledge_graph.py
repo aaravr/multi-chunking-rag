@@ -44,10 +44,10 @@ def _get_driver():
         try:
             from neo4j import GraphDatabase
             _driver = GraphDatabase.driver(
-                settings.neo4j_uri,
-                auth=(settings.neo4j_user, settings.neo4j_password),
+                settings.neo4j.uri,
+                auth=(settings.neo4j.user, settings.neo4j.password),
             )
-            logger.info("Neo4j driver connected to %s", settings.neo4j_uri)
+            logger.info("Neo4j driver connected to %s", settings.neo4j.uri)
         except Exception as exc:
             logger.warning("Neo4j connection failed: %s", exc)
             raise
@@ -66,7 +66,7 @@ def close_driver() -> None:
 def get_session() -> Iterator:
     """Yield a Neo4j session from the driver pool."""
     driver = _get_driver()
-    session = driver.session(database=settings.neo4j_database)
+    session = driver.session(database=settings.neo4j.database)
     try:
         yield session
     finally:
