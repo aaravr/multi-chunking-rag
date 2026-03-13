@@ -3,22 +3,27 @@
 Validates:
 - Deterministic classification from filename patterns
 - Deterministic classification from content signals
-- Memory-based classification (self-learning)
+- Embedding-based similarity matching (ModernBERT)
+- SGDClassifier incremental learning
+- Memory-based classification (keyword/filename)
 - Feedback reinforcement loop
 - LLM response parsing
-- Memory export/import
+- Memory export/import with embeddings
 - Fallback to unknown for unrecognizable documents
 """
 
 import json
 
+import numpy as np
 import pytest
 
 from agents.classifier_agent import (
     ClassificationMemory,
     ClassifierAgent,
+    EMBEDDING_SIMILARITY_THRESHOLD,
     MEMORY_MIN_OBSERVATIONS,
     MEMORY_TRUST_THRESHOLD,
+    SGD_MIN_SAMPLES,
     reset_classification_memory,
 )
 from agents.contracts import ClassificationResult, new_id
@@ -35,7 +40,13 @@ def reset_memory():
 
 @pytest.fixture
 def memory():
-    return ClassificationMemory()
+    return ClassificationMemory(embedding_dim=768)
+
+
+@pytest.fixture
+def small_memory():
+    """Memory with small embedding dim for fast tests."""
+    return ClassificationMemory(embedding_dim=4)
 
 
 @pytest.fixture
@@ -128,14 +139,116 @@ class TestDeterministicContent:
         """Content signals should override weak filename matches."""
         result = classifier.classify(
             doc_id="doc1",
-            filename="report.pdf",  # generic filename
+            filename="report.pdf",
             front_matter_text="ANNUAL REPORT PURSUANT TO SECTION 13 OR 15(d)",
         )
         assert result.document_type == "10-K"
         assert result.confidence >= 0.90
 
 
-# ── Memory-based classification ───────────────────────────────────────
+# ── Embedding-based similarity matching ───────────────────────────────
+
+
+class TestEmbeddingSimilarity:
+    def test_store_and_lookup_by_embedding(self, small_memory):
+        """Storing an embedding and looking up an identical vector should match."""
+        emb = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+        small_memory.store_embedding(emb, "10-K", "sec_filing")
+
+        result = small_memory.lookup_by_embedding(emb)
+        assert result is not None
+        doc_type, label, similarity = result
+        assert doc_type == "10-K"
+        assert label == "sec_filing"
+        assert similarity >= 0.99
+
+    def test_similar_embedding_matches(self, small_memory):
+        """A very similar embedding should match."""
+        emb1 = np.array([1.0, 0.1, 0.0, 0.0], dtype=np.float32)
+        emb2 = np.array([1.0, 0.15, 0.0, 0.0], dtype=np.float32)
+        small_memory.store_embedding(emb1, "10-K", "sec_filing")
+
+        result = small_memory.lookup_by_embedding(emb2)
+        assert result is not None
+        assert result[0] == "10-K"
+        assert result[2] > EMBEDDING_SIMILARITY_THRESHOLD
+
+    def test_dissimilar_embedding_no_match(self, small_memory):
+        """An orthogonal embedding should not match."""
+        emb1 = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+        emb2 = np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32)
+        small_memory.store_embedding(emb1, "10-K", "sec_filing")
+
+        result = small_memory.lookup_by_embedding(emb2)
+        assert result is None
+
+    def test_best_match_returned(self, small_memory):
+        """When multiple embeddings are stored, the most similar one wins."""
+        emb_a = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+        emb_b = np.array([0.0, 1.0, 0.0, 0.0], dtype=np.float32)
+        query = np.array([0.95, 0.05, 0.0, 0.0], dtype=np.float32)
+
+        small_memory.store_embedding(emb_a, "10-K", "sec_filing")
+        small_memory.store_embedding(emb_b, "contract", "legal_document")
+
+        result = small_memory.lookup_by_embedding(query)
+        assert result is not None
+        assert result[0] == "10-K"
+
+    def test_embedding_dim_mismatch_rejected(self, small_memory):
+        """Embedding with wrong dimension should be rejected."""
+        emb = np.array([1.0, 0.0], dtype=np.float32)  # dim=2, expected dim=4
+        small_memory.store_embedding(emb, "10-K", "sec_filing")
+        assert len(small_memory._embeddings) == 0
+
+
+# ── SGD Classifier ────────────────────────────────────────────────────
+
+
+class TestSGDClassifier:
+    def test_sgd_not_ready_with_few_samples(self, small_memory):
+        """SGD should not predict until it has enough samples."""
+        emb = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+        small_memory.store_embedding(emb, "10-K", "sec_filing")
+        result = small_memory.predict_sgd(emb)
+        assert result is None
+
+    def test_sgd_predicts_after_enough_samples(self, small_memory):
+        """After enough training samples, SGD should produce predictions."""
+        # Train with enough diverse samples
+        rng = np.random.RandomState(42)
+        for _ in range(SGD_MIN_SAMPLES):
+            emb = rng.randn(4).astype(np.float32)
+            emb[0] = abs(emb[0]) + 1.0  # bias toward positive x
+            small_memory.store_embedding(emb, "10-K", "sec_filing")
+
+        for _ in range(SGD_MIN_SAMPLES):
+            emb = rng.randn(4).astype(np.float32)
+            emb[1] = abs(emb[1]) + 1.0  # bias toward positive y
+            small_memory.store_embedding(emb, "contract", "legal_document")
+
+        # Now predict
+        query = np.array([2.0, 0.0, 0.0, 0.0], dtype=np.float32)
+        result = small_memory.predict_sgd(query)
+        assert result is not None
+        doc_type, label, confidence = result
+        assert confidence > 0
+
+    def test_sgd_trains_incrementally(self, small_memory):
+        """Each store_embedding call should increment the SGD sample count."""
+        assert small_memory._sgd_sample_count == 0
+        emb1 = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+        small_memory.store_embedding(emb1, "10-K", "sec_filing")
+        # With only 1 class, SGD defers fitting but still counts
+        assert small_memory._sgd_sample_count == 1
+        # Add second class to trigger bootstrap fit
+        emb2 = np.array([0.0, 1.0, 0.0, 0.0], dtype=np.float32)
+        small_memory.store_embedding(emb2, "contract", "legal_document")
+        assert small_memory._sgd_sample_count == 2
+        assert small_memory._sgd_fitted is True
+
+
+# ── Memory-based classification (keyword/filename) ────────────────────
 
 
 class TestMemoryClassification:
@@ -152,24 +265,20 @@ class TestMemoryClassification:
         assert patterns[0].document_type == "10-K"
 
     def test_memory_lookup_requires_min_observations(self, memory):
-        """Pattern must have enough observations to be trusted."""
         memory.store_pattern(
             document_type="10-K",
             classification_label="sec_filing",
             filename="test.pdf",
         )
-        # Only 1 observation, below threshold
         result = memory.lookup(filename="test.pdf")
         assert result is None
 
     def test_memory_lookup_returns_trusted_pattern(self, memory):
-        """Trusted patterns (high accuracy + enough observations) are returned."""
         pid = memory.store_pattern(
             document_type="10-K",
             classification_label="sec_filing",
             filename="test.pdf",
         )
-        # Simulate enough observations with positive feedback
         for _ in range(MEMORY_MIN_OBSERVATIONS):
             memory.store_pattern(
                 document_type="10-K",
@@ -216,7 +325,7 @@ class TestMemoryClassification:
 
 
 class TestMemoryPersistence:
-    def test_export_import_roundtrip(self, memory):
+    def test_export_import_patterns_roundtrip(self, memory):
         memory.store_pattern(
             document_type="10-K",
             classification_label="sec_filing",
@@ -231,20 +340,44 @@ class TestMemoryPersistence:
 
         exported = memory.export_json()
         data = json.loads(exported)
-        assert len(data) == 2
+        assert len(data["patterns"]) == 2
 
-        # Import into new memory
         new_memory = ClassificationMemory()
         count = new_memory.import_json(exported)
         assert count == 2
         assert len(new_memory.get_all_patterns()) == 2
 
-    def test_memory_stats(self, memory):
-        memory.store_pattern("10-K", "sec_filing", "a.pdf")
-        memory.store_pattern("contract", "legal_document", "b.pdf")
-        stats = memory.get_stats()
-        assert stats["total_patterns"] == 2
-        assert stats["total_observations"] == 2
+    def test_export_import_embeddings_roundtrip(self, small_memory):
+        emb = np.array([1.0, 0.0, 0.5, 0.0], dtype=np.float32)
+        small_memory.store_embedding(emb, "10-K", "sec_filing")
+
+        exported = small_memory.export_json()
+        data = json.loads(exported)
+        assert len(data["embeddings"]) == 1
+
+        new_memory = ClassificationMemory(embedding_dim=4)
+        count = new_memory.import_json(exported)
+        assert count >= 1
+        assert len(new_memory._embeddings) == 1
+
+        # Verify lookup still works after import
+        result = new_memory.lookup_by_embedding(emb)
+        assert result is not None
+        assert result[0] == "10-K"
+
+    def test_memory_stats_include_ml(self, small_memory):
+        # Need 2 classes for SGD to fit
+        emb1 = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+        emb2 = np.array([0.0, 1.0, 0.0, 0.0], dtype=np.float32)
+        small_memory.store_embedding(emb1, "10-K", "sec_filing")
+        small_memory.store_embedding(emb2, "contract", "legal_document")
+        small_memory.store_pattern("10-K", "sec_filing", "a.pdf")
+
+        stats = small_memory.get_stats()
+        assert stats["total_patterns"] == 1
+        assert stats["embedding_count"] == 2
+        assert stats["sgd_sample_count"] == 2
+        assert stats["sgd_fitted"] is True
 
 
 # ── LLM response parsing ─────────────────────────────────────────────
@@ -262,7 +395,6 @@ class TestLLMResponseParsing:
         assert result == ("contract", "legal_document", 0.85)
 
     def test_parse_caps_confidence(self, classifier):
-        """Confidence should be capped at 0.95 for LLM classifications."""
         response = '{"document_type": "10-K", "classification_label": "sec_filing", "confidence": 0.99}'
         result = classifier._parse_llm_response(response)
         assert result[2] == 0.95
@@ -288,13 +420,10 @@ class TestFallback:
         assert result.classification_method == "default"
 
     def test_low_confidence_filename_still_returns_result(self, classifier):
-        """Filename match below 0.85 threshold, no content or memory match,
-        should still return the filename match as fallback."""
         result = classifier.classify(
             doc_id="doc1",
             filename="policy_update.pdf",
         )
-        # policy pattern matches filename at 0.80 confidence (below 0.85)
         assert result.document_type == "policy_document"
         assert result.classification_label == "governance"
         assert result.classification_method == "deterministic"
@@ -329,7 +458,6 @@ class TestMessageBusIntegration:
 
 class TestSelfLearning:
     def test_classification_stores_in_memory(self):
-        """Each classification should be stored in memory for future learning."""
         memory = ClassificationMemory()
         bus = MessageBus()
         classifier = ClassifierAgent(bus=bus, gateway=None, memory=memory)
@@ -341,7 +469,6 @@ class TestSelfLearning:
         assert any(p.document_type == "10-K" for p in patterns)
 
     def test_repeated_classifications_increase_count(self):
-        """Classifying similar documents should reinforce memory patterns."""
         memory = ClassificationMemory()
         bus = MessageBus()
         classifier = ClassifierAgent(bus=bus, gateway=None, memory=memory)
@@ -350,13 +477,11 @@ class TestSelfLearning:
         classifier.classify(doc_id="doc2", filename="Company_10-K.pdf")
 
         patterns = memory.get_all_patterns()
-        # Should have merged into one pattern with count >= 2
         ten_k_patterns = [p for p in patterns if p.document_type == "10-K"]
         assert len(ten_k_patterns) >= 1
         assert ten_k_patterns[0].total_count >= 2
 
     def test_feedback_improves_accuracy(self):
-        """Positive feedback should increase pattern accuracy."""
         memory = ClassificationMemory()
         bus = MessageBus()
         classifier = ClassifierAgent(bus=bus, gateway=None, memory=memory)
@@ -371,3 +496,73 @@ class TestSelfLearning:
 
         updated = memory.get_all_patterns()
         assert updated[0].success_count == 2
+
+
+# ── Embedding-based self-learning via classifier ─────────────────────
+
+
+class TestEmbeddingClassification:
+    """Tests for embedding-based classification in the ClassifierAgent.
+
+    Uses a mock embedder to avoid loading the full ModernBERT model in tests.
+    """
+
+    def _make_classifier_with_mock_embedder(self, memory, embed_fn):
+        """Create a ClassifierAgent with a mock embedder."""
+
+        class MockEmbedder:
+            def embed_text(self, text):
+                return embed_fn(text)
+
+        bus = MessageBus()
+        return ClassifierAgent(
+            bus=bus, gateway=None, memory=memory, embedder=MockEmbedder()
+        )
+
+    def test_embedding_stored_on_classify(self):
+        """Classification should store the embedding in memory."""
+        memory = ClassificationMemory(embedding_dim=4)
+        emb = [1.0, 0.0, 0.0, 0.0]
+        classifier = self._make_classifier_with_mock_embedder(
+            memory, lambda text: emb
+        )
+
+        classifier.classify(
+            doc_id="doc1",
+            filename="Form_10-K.pdf",
+            front_matter_text="ANNUAL REPORT PURSUANT TO SECTION 13",
+        )
+
+        assert len(memory._embeddings) == 1
+        assert memory._sgd_sample_count == 1
+
+    def test_embedding_similarity_used_for_matching(self):
+        """After storing an embedding, a similar document should match via embedding."""
+        memory = ClassificationMemory(embedding_dim=4)
+        call_count = [0]
+
+        def embed_fn(text):
+            call_count[0] += 1
+            if call_count[0] <= 1:
+                return [1.0, 0.0, 0.0, 0.0]
+            return [0.99, 0.01, 0.0, 0.0]  # very similar
+
+        classifier = self._make_classifier_with_mock_embedder(memory, embed_fn)
+
+        # First classification: deterministic (10-K in filename)
+        classifier.classify(
+            doc_id="doc1",
+            filename="Form_10-K.pdf",
+            front_matter_text="ANNUAL REPORT PURSUANT TO SECTION 13",
+        )
+
+        # Second classification: unknown filename, but similar embedding
+        result = classifier.classify(
+            doc_id="doc2",
+            filename="unknown_doc.pdf",
+            front_matter_text="Some financial report text",
+        )
+
+        assert result.classification_method == "embedding_similarity"
+        assert result.document_type == "10-K"
+        assert result.confidence > EMBEDDING_SIMILARITY_THRESHOLD
