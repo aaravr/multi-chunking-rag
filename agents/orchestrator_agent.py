@@ -277,6 +277,23 @@ class OrchestratorAgent(BaseAgent):
         })
         mem.expire(query_id)
 
+        # Record query-level eval
+        from agents.agent_eval import QueryEval, get_evaluator
+        get_evaluator().record_query(QueryEval(
+            query_id=query_id,
+            user_query=inp.user_query,
+            total_latency_ms=total_ms,
+            total_tokens=token_usage.total_tokens,
+            total_cost_usd=self.gateway.get_total_cost() if self.gateway else 0.0,
+            agent_calls=len(self._execution_trace),
+            agent_errors=len(warnings),
+            final_confidence=confidence,
+            final_citation_accuracy=(
+                len(synthesis.citations) / max(len(all_chunks), 1)
+            ),
+            verification_verdict=verification.overall_verdict,
+        ))
+
         return OrchestratorOutput(
             query_id=query_id,
             answer=synthesis.answer,

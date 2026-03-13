@@ -109,7 +109,7 @@ class VerifierAgent(BaseAgent):
             rationale[:100],
         )
 
-        return VerificationResult(
+        result = VerificationResult(
             query_id=query_id,
             overall_verdict=overall,
             overall_confidence=confidence,
@@ -118,6 +118,19 @@ class VerifierAgent(BaseAgent):
             verification_model="deterministic",
             verification_method="deterministic",
         )
+
+        # Record eval metrics
+        from agents.agent_eval import EvalCase, get_evaluator
+        get_evaluator().record(EvalCase(
+            query_id=query_id,
+            agent_name=self.agent_name,
+            latency_ms=latency_ms,
+            answer_confidence=confidence,
+            citation_count=len(claim.cited_chunk_ids),
+            citations_verified=len(claim.cited_chunk_ids) if overall == "PASS" else 0,
+        ))
+
+        return result
 
     def _verify_qa(
         self, query: str, answer: str, chunks: List[RetrievedChunk]

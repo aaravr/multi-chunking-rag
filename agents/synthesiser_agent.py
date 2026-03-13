@@ -137,7 +137,7 @@ class SynthesiserAgent(BaseAgent):
             latency_ms,
         )
 
-        return SynthesisResult(
+        synth_result = SynthesisResult(
             query_id=query_id,
             answer=answer,
             citations=citations,
@@ -148,6 +148,21 @@ class SynthesiserAgent(BaseAgent):
             output_tokens=result.get("output_tokens", 0),
             synthesis_mode="llm",
         )
+
+        # Record eval metrics
+        from agents.agent_eval import EvalCase, get_evaluator
+        get_evaluator().record(EvalCase(
+            query_id=query_id,
+            agent_name=self.agent_name,
+            latency_ms=latency_ms,
+            input_tokens=result.get("input_tokens", 0),
+            output_tokens=result.get("output_tokens", 0),
+            cost_usd=result.get("cost_estimate", 0.0),
+            citation_count=len(citations),
+            evidence_chunks_used=len(chunks),
+        ))
+
+        return synth_result
 
     def _try_deterministic_coverage(
         self,
@@ -164,7 +179,7 @@ class SynthesiserAgent(BaseAgent):
         if mode == "deterministic" or len(items) >= MIN_ITEMS:
             answer = format_coverage_answer(query, chunks)
             citations = self._extract_citations(answer, chunks)
-            return SynthesisResult(
+            det_result = SynthesisResult(
                 query_id=query_id,
                 answer=answer,
                 citations=citations,
@@ -173,6 +188,17 @@ class SynthesiserAgent(BaseAgent):
                 model_id="deterministic",
                 synthesis_mode="deterministic",
             )
+
+            # Record eval metrics for deterministic path
+            from agents.agent_eval import EvalCase, get_evaluator
+            get_evaluator().record(EvalCase(
+                query_id=query_id,
+                agent_name=self.agent_name,
+                citation_count=len(citations),
+                evidence_chunks_used=len(chunks),
+            ))
+
+            return det_result
         return None
 
     def _format_sources(self, chunks: List[RetrievedChunk]) -> str:

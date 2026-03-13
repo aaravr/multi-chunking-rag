@@ -121,7 +121,7 @@ class RouterAgent(BaseAgent):
             latency_ms,
         )
 
-        return QueryPlan(
+        plan = QueryPlan(
             query_id=query_id,
             original_query=query,
             resolved_query=query,
@@ -132,6 +132,18 @@ class RouterAgent(BaseAgent):
             classification_confidence=0.9 if method == "deterministic" else 0.7,
             classification_method=method,
         )
+
+        # Record eval metrics
+        from agents.agent_eval import EvalCase, get_evaluator
+        get_evaluator().record(EvalCase(
+            query_id=query_id,
+            agent_name=self.agent_name,
+            latency_ms=latency_ms,
+            answer_confidence=plan.classification_confidence,
+            plan_steps=len(sub_queries),
+        ))
+
+        return plan
 
     def _classify_with_poc(self, query: str) -> QueryIntent:
         """Use existing PoC router for base classification."""

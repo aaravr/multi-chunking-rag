@@ -92,7 +92,7 @@ class RetrieverAgent(BaseAgent):
             latency_ms,
         )
 
-        return RankedEvidence(
+        result = RankedEvidence(
             query_id=message.query_id,
             sub_query_id=payload.get("sub_query_id", message.query_id),
             chunks=chunks,
@@ -101,6 +101,18 @@ class RetrieverAgent(BaseAgent):
             total_candidates_scanned=debug.get("total_candidates", len(chunks)),
             search_scope=scope,
         )
+
+        # Record eval metrics
+        from agents.agent_eval import EvalCase, get_evaluator
+        get_evaluator().record(EvalCase(
+            query_id=message.query_id,
+            agent_name=self.agent_name,
+            latency_ms=latency_ms,
+            evidence_chunks_used=len(chunks),
+            evidence_chunks_available=debug.get("total_candidates", len(chunks)),
+        ))
+
+        return result
 
     def _execute_retrieval(
         self,
