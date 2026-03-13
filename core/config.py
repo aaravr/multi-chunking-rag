@@ -26,6 +26,9 @@ class Settings:
     reranker_model: str = os.getenv(
         "RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2"
     )
+    enable_redis_working_memory: bool = _get_bool_env("ENABLE_REDIS_WORKING_MEMORY", True)
+    redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    redis_working_memory_ttl: int = int(os.getenv("REDIS_WORKING_MEMORY_TTL", "900"))
 
 
 settings = Settings()
