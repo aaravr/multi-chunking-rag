@@ -3,6 +3,9 @@
 Single entry point for creating the message bus. Returns:
 - KafkaBus when ENABLE_KAFKA_BUS=true (distributed A2A via Kafka)
 - MessageBus when ENABLE_KAFKA_BUS=false (in-process, default)
+
+The factory is also responsible for passing all enterprise config
+(compression, security, resilience) from Settings to the KafkaBus.
 """
 
 from __future__ import annotations
@@ -42,7 +45,12 @@ def get_bus(caller_agent: str = "orchestrator") -> AnyBus:
                 caller_agent=caller_agent,
                 request_timeout_ms=settings.kafka_request_timeout_ms,
             )
-            logger.info("Bus: KafkaBus (Kafka A2A)")
+            logger.info(
+                "Bus: KafkaBus (Kafka A2A, compression=%s, dlq=%s, idempotency=%s)",
+                settings.kafka_compression_type,
+                settings.kafka_enable_dlq,
+                settings.kafka_enable_idempotency,
+            )
         except Exception:
             logger.warning(
                 "Kafka unavailable — falling back to in-process MessageBus",
