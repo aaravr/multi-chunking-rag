@@ -72,6 +72,12 @@ class Settings:
     # ── Agent Evaluation ───────────────────────────────────────────────
     enable_agent_eval: bool = _get_bool_env("ENABLE_AGENT_EVAL", False)
     agent_eval_log_dir: str = os.getenv("AGENT_EVAL_LOG_DIR", "eval_logs")
+    # ── Neo4j Knowledge Graph (§6.4) ─────────────────────────────────
+    enable_neo4j: bool = _get_bool_env("ENABLE_NEO4J", False)
+    neo4j_uri: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+    neo4j_user: str = os.getenv("NEO4J_USER", "neo4j")
+    neo4j_password: str = os.getenv("NEO4J_PASSWORD", "neo4jpassword")
+    neo4j_database: str = os.getenv("NEO4J_DATABASE", "neo4j")
 
 
 settings = Settings()

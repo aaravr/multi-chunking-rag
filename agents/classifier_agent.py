@@ -5,24 +5,31 @@ the processing pipeline. Uses a 4-tier classification strategy orchestrated by
 a LangGraph StateGraph with conditional routing:
 
 1. **Deterministic rules**: Filename patterns, structural signals (fast, free)
-2. **LlamaIndex similarity**: VectorStoreIndex over prior classified documents
-   with cosine similarity retrieval for semantic memory matching
+2. **pgvector similarity**: PostgreSQL + pgvector HNSW index over prior classified
+   documents with cosine similarity retrieval for semantic memory matching
 3. **Incremental classifier**: sklearn SGDClassifier with partial_fit() —
    trained online from every classification, improves over time
 4. **LLM classification**: LangChain ChatPromptTemplate + Tier-2 model for
    ambiguous documents (fallback)
 
+Storage backends:
+- **pgvector**: classification_embeddings table with HNSW cosine index for
+  persistent vector similarity (primary). Falls back to in-memory numpy when
+  DATABASE_URL is not configured (e.g., unit tests).
+- **Neo4j**: Knowledge graph for document→type→label relationships, entity
+  mentions, and cross-document discovery. Feature-flagged via ENABLE_NEO4J.
+
 Frameworks:
 - **LangGraph**: StateGraph with conditional edges for classification flow
 - **LangChain**: ChatPromptTemplate for structured LLM prompts
-- **LlamaIndex**: VectorStoreIndex for embedding-based memory retrieval
 - **sklearn**: SGDClassifier for incremental online learning
 
 Self-learning loop:
 - After each classification, the front-matter embedding + label are stored
-  in the LlamaIndex VectorStoreIndex and the SGDClassifier is trained
+  in pgvector and the SGDClassifier is trained
+- Classifications are also recorded in the Neo4j knowledge graph
 - The orchestrator can send feedback to reinforce/correct classifications
-- Memory persists via JSON export/import (embeddings + classifier state)
+- Memory persists via pgvector (embeddings) + classification_memory table (patterns)
 """
 
 from __future__ import annotations
@@ -38,9 +45,6 @@ from typing import Any, Dict, List, Optional, Tuple, TypedDict
 import numpy as np
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import END, StateGraph
-from llama_index.core.schema import TextNode
-from llama_index.core.vector_stores.simple import SimpleVectorStore
-from llama_index.core.vector_stores.types import VectorStoreQuery
 from sklearn.linear_model import SGDClassifier
 
 from agents.base import BaseAgent
@@ -52,6 +56,7 @@ from agents.contracts import (
 )
 from agents.message_bus import MessageBus
 from agents.model_gateway import ModelGateway
+from core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -145,30 +150,159 @@ class ClassificationState(TypedDict):
     method: str             # which tier resolved it
 
 
-# ── Classification Memory (LlamaIndex + sklearn) ─────────────────────
+# ── pgvector DB helpers ───────────────────────────────────────────────
+
+def _pgvector_available() -> bool:
+    """Check if pgvector-backed storage is available (DATABASE_URL configured)."""
+    return bool(settings.database_url)
+
+
+def _pgvector_store_embedding(
+    embedding_id: str,
+    embedding: np.ndarray,
+    document_type: str,
+    classification_label: str,
+    source_doc_id: Optional[str] = None,
+) -> bool:
+    """Store embedding in pgvector. Returns True on success."""
+    try:
+        from storage.db_pool import get_connection
+        from storage.repo import insert_classification_embedding
+        with get_connection() as conn:
+            insert_classification_embedding(
+                conn, embedding_id, document_type, classification_label,
+                embedding.tolist(), source_doc_id,
+            )
+            conn.commit()
+        return True
+    except Exception as exc:
+        logger.debug("pgvector store failed (falling back to in-memory): %s", exc)
+        return False
+
+
+def _pgvector_search_embedding(
+    query_embedding: np.ndarray,
+    threshold: float = EMBEDDING_SIMILARITY_THRESHOLD,
+) -> Optional[Tuple[str, str, float]]:
+    """Search pgvector for nearest classification embedding.
+    Returns (document_type, classification_label, similarity) or None.
+    """
+    try:
+        from storage.db_pool import get_connection
+        from storage.repo import search_classification_embeddings
+        with get_connection() as conn:
+            results = search_classification_embeddings(
+                conn, query_embedding.tolist(), top_k=1, threshold=threshold,
+            )
+        if results:
+            r = results[0]
+            return (r["document_type"], r["classification_label"], r["similarity"])
+        return None
+    except Exception as exc:
+        logger.debug("pgvector search failed (falling back to in-memory): %s", exc)
+        return None
+
+
+def _pgvector_fetch_all() -> List[dict]:
+    """Fetch all classification embeddings from pgvector for SGD retraining."""
+    try:
+        from storage.db_pool import get_connection
+        from storage.repo import fetch_all_classification_embeddings
+        with get_connection() as conn:
+            return fetch_all_classification_embeddings(conn)
+    except Exception as exc:
+        logger.debug("pgvector fetch_all failed: %s", exc)
+        return []
+
+
+def _pgvector_count() -> int:
+    """Count classification embeddings in pgvector."""
+    try:
+        from storage.db_pool import get_connection
+        from storage.repo import count_classification_embeddings
+        with get_connection() as conn:
+            return count_classification_embeddings(conn)
+    except Exception:
+        return 0
+
+
+# ── Neo4j Knowledge Graph helpers ─────────────────────────────────────
+
+def _neo4j_available() -> bool:
+    """Check if Neo4j knowledge graph is enabled and available."""
+    return settings.enable_neo4j
+
+
+def _neo4j_store_classification(
+    doc_id: str,
+    filename: str,
+    document_type: str,
+    classification_label: str,
+    confidence: float,
+    method: str,
+    page_count: int = 0,
+) -> bool:
+    """Store classification in Neo4j knowledge graph. Returns True on success."""
+    try:
+        from storage.knowledge_graph import store_classification
+        store_classification(
+            doc_id=doc_id, filename=filename,
+            document_type=document_type, classification_label=classification_label,
+            confidence=confidence, method=method, page_count=page_count,
+        )
+        return True
+    except Exception as exc:
+        logger.debug("Neo4j store failed: %s", exc)
+        return False
+
+
+def _neo4j_find_similar(
+    document_type: str,
+    classification_label: str,
+    limit: int = 5,
+) -> List[Dict[str, Any]]:
+    """Find similar documents via Neo4j graph traversal."""
+    try:
+        from storage.knowledge_graph import find_similar_documents
+        return find_similar_documents(document_type, classification_label, limit)
+    except Exception as exc:
+        logger.debug("Neo4j find_similar failed: %s", exc)
+        return []
+
+
+# ── Classification Memory (pgvector + Neo4j + sklearn) ────────────────
 
 class ClassificationMemory:
-    """Self-learning classification memory using LlamaIndex + sklearn.
+    """Self-learning classification memory using pgvector + Neo4j + sklearn.
 
-    - **LlamaIndex VectorStoreIndex**: stores prior classification embeddings
-      as TextNodes. Retrieval via cosine similarity replaces the hand-rolled
-      numpy cosine search.
-    - **SGDClassifier**: online learning from embeddings for trainable
-      classification beyond nearest-neighbor.
-    - **Pattern store**: keyword/filename index for zero-cost exact matches.
+    **Vector DB (pgvector)**: Primary store for classification embeddings.
+    Uses PostgreSQL + pgvector with HNSW cosine index for persistent
+    similarity search. Falls back to in-memory numpy when DATABASE_URL
+    is not configured (unit tests, local dev without DB).
+
+    **Knowledge Graph (Neo4j)**: Stores document classification relationships
+    as a graph (Document→DocumentType→ClassificationLabel). Enables
+    graph-based discovery of similar documents and classification patterns.
+    Feature-flagged via ENABLE_NEO4J.
+
+    **SGDClassifier (sklearn)**: Online learning from embeddings for trainable
+    classification beyond nearest-neighbor. Trained incrementally with
+    partial_fit() on every new classification.
+
+    **Pattern store**: keyword/filename index for zero-cost exact matches.
     """
 
-    def __init__(self, embedding_dim: int = 768) -> None:
+    def __init__(self, embedding_dim: int = 768, use_db: Optional[bool] = None) -> None:
         self._embedding_dim = embedding_dim
 
-        # ── LlamaIndex SimpleVectorStore ──────────────────────────────
-        self._index_nodes: List[TextNode] = []
-        self._vector_store: Optional[SimpleVectorStore] = None
-        self._embedding_doc_types: List[str] = []
-        self._embedding_class_labels: List[str] = []
-        # Keep raw embeddings for SGD + export
-        self._embeddings: List[np.ndarray] = []
-        self._embedding_labels: List[str] = []
+        # Whether to use pgvector DB backend. None = auto-detect.
+        self._use_db = use_db if use_db is not None else _pgvector_available()
+
+        # ── In-memory fallback (used when pgvector unavailable) ───────
+        self._mem_embeddings: List[np.ndarray] = []
+        self._mem_doc_types: List[str] = []
+        self._mem_class_labels: List[str] = []
+        self._mem_labels: List[str] = []  # compound "type::label"
 
         # ── sklearn SGD classifier ────────────────────────────────────
         self._sgd: SGDClassifier = SGDClassifier(
@@ -189,15 +323,16 @@ class ClassificationMemory:
         self._filename_index: Dict[str, List[str]] = defaultdict(list)
         self._keyword_index: Dict[str, List[str]] = defaultdict(list)
 
-    # ── LlamaIndex embedding operations ──────────────────────────────
+    # ── pgvector / in-memory embedding operations ────────────────────
 
     def store_embedding(
         self,
         embedding: np.ndarray,
         document_type: str,
         classification_label: str,
+        source_doc_id: Optional[str] = None,
     ) -> None:
-        """Store a document embedding in the LlamaIndex index + train SGD."""
+        """Store a document embedding in pgvector (or in-memory fallback) + train SGD."""
         emb = np.asarray(embedding, dtype=np.float32).ravel()
         if emb.shape[0] != self._embedding_dim:
             logger.warning(
@@ -207,25 +342,19 @@ class ClassificationMemory:
             return
 
         compound_label = f"{document_type}::{classification_label}"
+        embedding_id = new_id()
 
-        # Store in LlamaIndex as a TextNode with pre-computed embedding
-        node = TextNode(
-            text=compound_label,
-            id_=new_id(),
-            embedding=emb.tolist(),
-            metadata={
-                "document_type": document_type,
-                "classification_label": classification_label,
-            },
-        )
-        self._index_nodes.append(node)
-        self._vector_store = None  # Invalidate — rebuilt on next query
+        # Primary: pgvector persistent storage
+        if self._use_db:
+            _pgvector_store_embedding(
+                embedding_id, emb, document_type, classification_label, source_doc_id,
+            )
 
-        # Keep raw data for SGD + export
-        self._embeddings.append(emb)
-        self._embedding_labels.append(compound_label)
-        self._embedding_doc_types.append(document_type)
-        self._embedding_class_labels.append(classification_label)
+        # Always keep in-memory copy for SGD training + stats
+        self._mem_embeddings.append(emb)
+        self._mem_labels.append(compound_label)
+        self._mem_doc_types.append(document_type)
+        self._mem_class_labels.append(classification_label)
 
         self._train_incremental(emb, compound_label)
 
@@ -234,49 +363,52 @@ class ClassificationMemory:
         query_embedding: np.ndarray,
         threshold: float = EMBEDDING_SIMILARITY_THRESHOLD,
     ) -> Optional[Tuple[str, str, float]]:
-        """Find the most similar stored document via LlamaIndex SimpleVectorStore.
+        """Find the most similar stored document via pgvector cosine similarity.
 
-        Uses SimpleVectorStore.add() to preserve pre-computed embeddings on
-        TextNodes, then queries with cosine similarity.
+        Primary: pgvector HNSW index in PostgreSQL.
+        Fallback: in-memory numpy cosine similarity (when DB unavailable).
+
         Returns (document_type, classification_label, similarity) or None.
         """
-        if not self._index_nodes:
-            return None
-
         query_emb = np.asarray(query_embedding, dtype=np.float32).ravel()
 
-        # Build/rebuild the vector store lazily. SimpleVectorStore.add()
-        # preserves pre-computed embeddings on TextNodes directly, unlike
-        # VectorStoreIndex which re-embeds via the embed_model.
-        if self._vector_store is None:
-            self._vector_store = SimpleVectorStore()
-            self._vector_store.add(self._index_nodes)
+        # Try pgvector first
+        if self._use_db:
+            result = _pgvector_search_embedding(query_emb, threshold)
+            if result is not None:
+                return result
 
-        try:
-            query_result = self._vector_store.query(
-                VectorStoreQuery(
-                    query_embedding=query_emb.tolist(),
-                    similarity_top_k=1,
-                )
-            )
+        # Fallback: in-memory numpy cosine similarity
+        return self._lookup_in_memory(query_emb, threshold)
 
-            if not query_result.ids or not query_result.similarities:
-                return None
-
-            best_sim = float(query_result.similarities[0])
-            if best_sim < threshold:
-                return None
-
-            # SimpleVectorStore returns ids, not full nodes — look up metadata
-            best_id = query_result.ids[0]
-            metadata = self._vector_store._data.metadata_dict.get(best_id, {})
-            doc_type = metadata.get("document_type", "unknown")
-            label = metadata.get("classification_label", "unclassified")
-            return (doc_type, label, best_sim)
-
-        except Exception as exc:
-            logger.warning("LlamaIndex retrieval failed: %s", exc)
+    def _lookup_in_memory(
+        self,
+        query_emb: np.ndarray,
+        threshold: float,
+    ) -> Optional[Tuple[str, str, float]]:
+        """In-memory cosine similarity fallback when pgvector is unavailable."""
+        if not self._mem_embeddings:
             return None
+
+        # Compute cosine similarities
+        query_norm = query_emb / (np.linalg.norm(query_emb) + 1e-10)
+        best_sim = -1.0
+        best_idx = -1
+        for i, stored_emb in enumerate(self._mem_embeddings):
+            stored_norm = stored_emb / (np.linalg.norm(stored_emb) + 1e-10)
+            sim = float(np.dot(query_norm, stored_norm))
+            if sim > best_sim:
+                best_sim = sim
+                best_idx = i
+
+        if best_sim < threshold or best_idx < 0:
+            return None
+
+        return (
+            self._mem_doc_types[best_idx],
+            self._mem_class_labels[best_idx],
+            best_sim,
+        )
 
     def predict_sgd(
         self, query_embedding: np.ndarray
@@ -310,7 +442,7 @@ class ClassificationMemory:
             self._sgd_sample_count += 1
             return
 
-        if not self._sgd_fitted and len(self._embeddings) >= 2:
+        if not self._sgd_fitted and len(self._mem_embeddings) >= 2:
             self._retrain_sgd_from_store()
             return
 
@@ -323,16 +455,43 @@ class ClassificationMemory:
 
     def _retrain_sgd_from_store(self) -> None:
         """Retrain SGDClassifier from all stored embeddings."""
-        if not self._embeddings or len(self._sgd_classes) < 2:
+        if not self._mem_embeddings or len(self._sgd_classes) < 2:
             return
-        X = np.stack(self._embeddings)
-        y = self._embedding_labels
+        X = np.stack(self._mem_embeddings)
+        y = self._mem_labels
         try:
             self._sgd.partial_fit(X, y, classes=self._sgd_classes)
             self._sgd_fitted = True
-            self._sgd_sample_count = len(self._embeddings)
+            self._sgd_sample_count = len(self._mem_embeddings)
         except Exception as exc:
             logger.warning("SGD retrain failed: %s", exc)
+
+    def bootstrap_sgd_from_pgvector(self) -> int:
+        """Load all embeddings from pgvector and retrain SGD.
+
+        Use on startup to warm the SGD classifier from persistent storage.
+        Returns the number of embeddings loaded.
+        """
+        if not self._use_db:
+            return 0
+        rows = _pgvector_fetch_all()
+        if not rows:
+            return 0
+        for row in rows:
+            emb = np.array(row["embedding"], dtype=np.float32)
+            compound = f"{row['document_type']}::{row['classification_label']}"
+            self._mem_embeddings.append(emb)
+            self._mem_labels.append(compound)
+            self._mem_doc_types.append(row["document_type"])
+            self._mem_class_labels.append(row["classification_label"])
+            if compound not in self._sgd_classes:
+                self._sgd_classes.append(compound)
+        if len(self._sgd_classes) >= 2:
+            self._retrain_sgd_from_store()
+        else:
+            self._sgd_sample_count = len(self._mem_embeddings)
+        logger.info("Bootstrapped SGD from pgvector: %d embeddings", len(rows))
+        return len(rows)
 
     # ── Pattern store operations ──────────────────────────────────────
 
@@ -429,13 +588,16 @@ class ClassificationMemory:
     def get_stats(self) -> Dict[str, Any]:
         patterns = list(self._patterns.values())
         trusted = [p for p in patterns if p.accuracy >= MEMORY_TRUST_THRESHOLD and p.total_count >= MEMORY_MIN_OBSERVATIONS]
+        pgvector_count = _pgvector_count() if self._use_db else 0
         return {
             "total_patterns": len(patterns),
             "trusted_patterns": len(trusted),
             "total_observations": sum(p.total_count for p in patterns),
             "avg_accuracy": (sum(p.accuracy for p in patterns) / len(patterns) if patterns else 0.0),
-            "embedding_count": len(self._embeddings),
-            "llama_index_nodes": len(self._index_nodes),
+            "embedding_count": len(self._mem_embeddings),
+            "pgvector_count": pgvector_count,
+            "vector_backend": "pgvector" if self._use_db else "in-memory",
+            "neo4j_enabled": _neo4j_available(),
             "sgd_fitted": self._sgd_fitted,
             "sgd_sample_count": self._sgd_sample_count,
             "sgd_classes": list(self._sgd_classes),
@@ -460,11 +622,11 @@ class ClassificationMemory:
                 "total_count": entry.total_count,
                 "last_used": entry.last_used,
             })
-        for i, emb in enumerate(self._embeddings):
+        for i, emb in enumerate(self._mem_embeddings):
             data["embeddings"].append({
                 "embedding": emb.tolist(),
-                "document_type": self._embedding_doc_types[i],
-                "classification_label": self._embedding_class_labels[i],
+                "document_type": self._mem_doc_types[i],
+                "classification_label": self._mem_class_labels[i],
             })
         return json.dumps(data, indent=2)
 
@@ -502,24 +664,13 @@ class ClassificationMemory:
         for item in embeddings:
             emb = np.array(item["embedding"], dtype=np.float32)
             compound = f"{item['document_type']}::{item['classification_label']}"
-            node = TextNode(
-                text=compound,
-                id_=new_id(),
-                embedding=emb.tolist(),
-                metadata={
-                    "document_type": item["document_type"],
-                    "classification_label": item["classification_label"],
-                },
-            )
-            self._index_nodes.append(node)
-            self._embeddings.append(emb)
-            self._embedding_doc_types.append(item["document_type"])
-            self._embedding_class_labels.append(item["classification_label"])
-            self._embedding_labels.append(compound)
+            self._mem_embeddings.append(emb)
+            self._mem_doc_types.append(item["document_type"])
+            self._mem_class_labels.append(item["classification_label"])
+            self._mem_labels.append(compound)
             count += 1
 
-        self._vector_store = None  # Force rebuild
-        if self._embeddings and self._sgd_classes:
+        if self._mem_embeddings and self._sgd_classes:
             self._retrain_sgd_from_store()
         return count
 
@@ -617,8 +768,8 @@ def _node_deterministic(state: ClassificationState) -> dict:
     return {"det_result": best, "result": None, "method": ""}
 
 
-def _node_llama_index_similarity(state: ClassificationState, memory: ClassificationMemory) -> dict:
-    """Tier 2: LlamaIndex VectorStoreIndex cosine similarity lookup."""
+def _node_pgvector_similarity(state: ClassificationState, memory: ClassificationMemory) -> dict:
+    """Tier 2: pgvector cosine similarity lookup (falls back to in-memory numpy)."""
     embedding = state.get("embedding")
     if embedding is None:
         return {"result": None, "method": ""}
@@ -764,10 +915,10 @@ def _build_classification_graph(
 
     Graph topology:
         embed → deterministic → [resolved?] → END
-                                [not resolved?] → llama_similarity → [resolved?] → END
-                                                                      [not?] → sgd → [resolved?] → END
-                                                                                      [not?] → llm → [resolved?] → END
-                                                                                                      [not?] → fallback → END
+                                [not resolved?] → pgvector_similarity → [resolved?] → END
+                                                                         [not?] → sgd → [resolved?] → END
+                                                                                         [not?] → llm → [resolved?] → END
+                                                                                                         [not?] → fallback → END
     Uses conditional edges to short-circuit as soon as a tier resolves.
     """
     graph = StateGraph(ClassificationState)
@@ -775,7 +926,7 @@ def _build_classification_graph(
     # Add nodes — each node is a lambda that closes over its dependencies
     graph.add_node("embed", lambda s: _node_compute_embedding(s, embedder))
     graph.add_node("deterministic", _node_deterministic)
-    graph.add_node("llama_similarity", lambda s: _node_llama_index_similarity(s, memory))
+    graph.add_node("pgvector_similarity", lambda s: _node_pgvector_similarity(s, memory))
     graph.add_node("sgd", lambda s: _node_sgd_classifier(s, memory))
     graph.add_node("llm", lambda s: _node_llm_classify(s, gateway))
     graph.add_node("fallback", _node_fallback)
@@ -790,9 +941,9 @@ def _build_classification_graph(
 
     graph.add_conditional_edges("deterministic", _is_resolved, {
         "resolved": END,
-        "unresolved": "llama_similarity",
+        "unresolved": "pgvector_similarity",
     })
-    graph.add_conditional_edges("llama_similarity", _is_resolved, {
+    graph.add_conditional_edges("pgvector_similarity", _is_resolved, {
         "resolved": END,
         "unresolved": "sgd",
     })
@@ -815,10 +966,11 @@ class ClassifierAgent(BaseAgent):
     """Self-learning document classifier (§4.8).
 
     Orchestrated by a LangGraph StateGraph with conditional edges:
-    embed → deterministic → llama_similarity → sgd → llm → fallback
+    embed → deterministic → pgvector_similarity → sgd → llm → fallback
 
     Each tier short-circuits via conditional edges when resolved.
-    Results stored in LlamaIndex VectorStoreIndex + sklearn SGDClassifier.
+    Results stored in pgvector (PostgreSQL) + sklearn SGDClassifier.
+    Classifications also recorded in Neo4j knowledge graph (when enabled).
     Prompts structured via LangChain ChatPromptTemplate.
     """
 
@@ -900,7 +1052,7 @@ class ClassifierAgent(BaseAgent):
         embedding = final_state.get("embedding")
 
         # Store in memory for future learning
-        self._store_in_memory(result, filename, front_matter_text, embedding)
+        self._store_in_memory(result, filename, front_matter_text, embedding, page_count)
         self._log_classification(result, start, query_id)
 
         return result
@@ -922,6 +1074,7 @@ class ClassifierAgent(BaseAgent):
         filename: str,
         front_matter_text: str,
         embedding: Optional[np.ndarray] = None,
+        page_count: int = 0,
     ) -> None:
         title_keywords = self._extract_title_keywords(front_matter_text)
         self._memory.store_pattern(
@@ -936,6 +1089,18 @@ class ClassifierAgent(BaseAgent):
                 embedding=embedding,
                 document_type=result.document_type,
                 classification_label=result.classification_label,
+                source_doc_id=result.doc_id,
+            )
+        # Store in Neo4j knowledge graph (when enabled)
+        if _neo4j_available():
+            _neo4j_store_classification(
+                doc_id=result.doc_id,
+                filename=filename,
+                document_type=result.document_type,
+                classification_label=result.classification_label,
+                confidence=result.confidence,
+                method=result.classification_method,
+                page_count=page_count,
             )
 
     def _extract_title_keywords(self, text: str) -> List[str]:

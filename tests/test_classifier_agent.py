@@ -1,15 +1,17 @@
 """Tests for the Classifier Agent (MASTER_PROMPT §4.8).
 
 Validates:
-- LangGraph flow: deterministic → llama_similarity → sgd → llm → fallback
+- LangGraph flow: deterministic → pgvector_similarity → sgd → llm → fallback
 - LangChain ChatPromptTemplate for LLM prompts
-- LlamaIndex VectorStoreIndex for embedding similarity
+- pgvector embedding similarity (in-memory fallback mode for unit tests)
 - sklearn SGDClassifier incremental learning
 - Pattern memory + feedback loop
 - Memory export/import with embeddings
+- Neo4j knowledge graph integration (mocked)
 """
 
 import json
+from unittest.mock import patch, MagicMock
 
 import numpy as np
 import pytest
@@ -23,6 +25,8 @@ from agents.classifier_agent import (
     SGD_MIN_SAMPLES,
     CLASSIFICATION_PROMPT,
     reset_classification_memory,
+    _neo4j_available,
+    _neo4j_store_classification,
 )
 from agents.contracts import ClassificationResult, new_id
 from agents.message_bus import MessageBus
@@ -37,18 +41,18 @@ def reset_memory():
 
 @pytest.fixture
 def memory():
-    return ClassificationMemory(embedding_dim=768)
+    return ClassificationMemory(embedding_dim=768, use_db=False)
 
 
 @pytest.fixture
 def small_memory():
-    return ClassificationMemory(embedding_dim=4)
+    return ClassificationMemory(embedding_dim=4, use_db=False)
 
 
 @pytest.fixture
 def classifier():
     bus = MessageBus()
-    return ClassifierAgent(bus=bus, gateway=None, memory=ClassificationMemory())
+    return ClassifierAgent(bus=bus, gateway=None, memory=ClassificationMemory(use_db=False))
 
 
 # ── LangChain prompt template ─────────────────────────────────────────
@@ -147,10 +151,10 @@ class TestDeterministicContent:
         assert result.confidence >= 0.90
 
 
-# ── LlamaIndex embedding similarity ──────────────────────────────────
+# ── pgvector embedding similarity (in-memory fallback) ────────────────
 
 
-class TestLlamaIndexSimilarity:
+class TestPgvectorSimilarity:
     def test_store_and_lookup_by_embedding(self, small_memory):
         emb = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
         small_memory.store_embedding(emb, "10-K", "sec_filing")
@@ -190,13 +194,23 @@ class TestLlamaIndexSimilarity:
     def test_embedding_dim_mismatch_rejected(self, small_memory):
         emb = np.array([1.0, 0.0], dtype=np.float32)
         small_memory.store_embedding(emb, "10-K", "sec_filing")
-        assert len(small_memory._embeddings) == 0
+        assert len(small_memory._mem_embeddings) == 0
 
-    def test_llama_index_nodes_tracked(self, small_memory):
+    def test_embedding_count_tracked(self, small_memory):
         emb = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
         small_memory.store_embedding(emb, "10-K", "sec_filing")
         stats = small_memory.get_stats()
-        assert stats["llama_index_nodes"] == 1
+        assert stats["embedding_count"] == 1
+        assert stats["vector_backend"] == "in-memory"
+
+    def test_in_memory_cosine_exact(self, small_memory):
+        """Verify in-memory cosine similarity computes correctly."""
+        emb = np.array([0.5, 0.5, 0.5, 0.5], dtype=np.float32)
+        small_memory.store_embedding(emb, "report", "financial_report")
+        # Identical vector should give similarity = 1.0
+        result = small_memory.lookup_by_embedding(emb)
+        assert result is not None
+        assert result[2] >= 0.999
 
 
 # ── SGD Classifier ────────────────────────────────────────────────────
@@ -280,7 +294,7 @@ class TestMemoryPersistence:
         memory.store_pattern("10-K", "sec_filing", "filing.pdf", ["Annual Report"])
         memory.store_pattern("contract", "legal_document", "agreement.pdf")
         exported = memory.export_json()
-        new_memory = ClassificationMemory()
+        new_memory = ClassificationMemory(use_db=False)
         count = new_memory.import_json(exported)
         assert count == 2
         assert len(new_memory.get_all_patterns()) == 2
@@ -289,10 +303,10 @@ class TestMemoryPersistence:
         emb = np.array([1.0, 0.0, 0.5, 0.0], dtype=np.float32)
         small_memory.store_embedding(emb, "10-K", "sec_filing")
         exported = small_memory.export_json()
-        new_memory = ClassificationMemory(embedding_dim=4)
+        new_memory = ClassificationMemory(embedding_dim=4, use_db=False)
         count = new_memory.import_json(exported)
         assert count >= 1
-        assert len(new_memory._embeddings) == 1
+        assert len(new_memory._mem_embeddings) == 1
         result = new_memory.lookup_by_embedding(emb)
         assert result is not None
         assert result[0] == "10-K"
@@ -306,7 +320,7 @@ class TestMemoryPersistence:
         stats = small_memory.get_stats()
         assert stats["total_patterns"] == 1
         assert stats["embedding_count"] == 2
-        assert stats["llama_index_nodes"] == 2
+        assert stats["vector_backend"] == "in-memory"
         assert stats["sgd_sample_count"] == 2
         assert stats["sgd_fitted"] is True
 
@@ -380,14 +394,14 @@ class TestMessageBusIntegration:
 
 class TestSelfLearning:
     def test_classification_stores_in_memory(self):
-        memory = ClassificationMemory()
+        memory = ClassificationMemory(use_db=False)
         bus = MessageBus()
         classifier = ClassifierAgent(bus=bus, gateway=None, memory=memory)
         classifier.classify(doc_id="doc1", filename="Company_10-K.pdf")
         assert any(p.document_type == "10-K" for p in memory.get_all_patterns())
 
     def test_repeated_classifications_increase_count(self):
-        memory = ClassificationMemory()
+        memory = ClassificationMemory(use_db=False)
         bus = MessageBus()
         classifier = ClassifierAgent(bus=bus, gateway=None, memory=memory)
         classifier.classify(doc_id="doc1", filename="Company_10-K.pdf")
@@ -396,7 +410,7 @@ class TestSelfLearning:
         assert ten_k[0].total_count >= 2
 
     def test_feedback_improves_accuracy(self):
-        memory = ClassificationMemory()
+        memory = ClassificationMemory(use_db=False)
         bus = MessageBus()
         classifier = ClassifierAgent(bus=bus, gateway=None, memory=memory)
         classifier.classify(doc_id="doc1", filename="Company_10-K.pdf")
@@ -418,7 +432,7 @@ class TestEmbeddingClassification:
         return ClassifierAgent(bus=bus, gateway=None, memory=memory, embedder=MockEmbedder())
 
     def test_embedding_stored_on_classify(self):
-        memory = ClassificationMemory(embedding_dim=4)
+        memory = ClassificationMemory(embedding_dim=4, use_db=False)
         classifier = self._make_classifier_with_mock_embedder(
             memory, lambda text: [1.0, 0.0, 0.0, 0.0]
         )
@@ -426,11 +440,11 @@ class TestEmbeddingClassification:
             doc_id="doc1", filename="Form_10-K.pdf",
             front_matter_text="ANNUAL REPORT PURSUANT TO SECTION 13",
         )
-        assert len(memory._embeddings) == 1
+        assert len(memory._mem_embeddings) == 1
         assert memory._sgd_sample_count == 1
 
     def test_embedding_similarity_used_for_matching(self):
-        memory = ClassificationMemory(embedding_dim=4)
+        memory = ClassificationMemory(embedding_dim=4, use_db=False)
         call_count = [0]
 
         def embed_fn(text):
@@ -447,7 +461,7 @@ class TestEmbeddingClassification:
             front_matter_text="ANNUAL REPORT PURSUANT TO SECTION 13",
         )
 
-        # Second: unknown filename, should match via LlamaIndex similarity
+        # Second: unknown filename, should match via pgvector similarity (in-memory fallback)
         result = classifier.classify(
             doc_id="doc2", filename="unknown_doc.pdf",
             front_matter_text="Some financial report text",
@@ -455,3 +469,49 @@ class TestEmbeddingClassification:
         assert result.classification_method == "embedding_similarity"
         assert result.document_type == "10-K"
         assert result.confidence > EMBEDDING_SIMILARITY_THRESHOLD
+
+
+# ── Neo4j knowledge graph integration ─────────────────────────────────
+
+
+class TestNeo4jIntegration:
+    @patch("agents.classifier_agent._neo4j_available", return_value=True)
+    @patch("agents.classifier_agent._neo4j_store_classification")
+    def test_classification_stored_in_neo4j(self, mock_store, mock_avail):
+        """Classifications should be stored in Neo4j when enabled."""
+        memory = ClassificationMemory(use_db=False)
+        bus = MessageBus()
+        classifier = ClassifierAgent(bus=bus, gateway=None, memory=memory)
+        classifier.classify(doc_id="doc1", filename="Company_10-K.pdf", page_count=50)
+        mock_store.assert_called_once()
+        call_kwargs = mock_store.call_args
+        assert call_kwargs[1]["doc_id"] == "doc1" or call_kwargs[0][0] == "doc1"
+
+    @patch("agents.classifier_agent._neo4j_available", return_value=False)
+    @patch("agents.classifier_agent._neo4j_store_classification")
+    def test_neo4j_skipped_when_disabled(self, mock_store, mock_avail):
+        """Neo4j should not be called when disabled."""
+        memory = ClassificationMemory(use_db=False)
+        bus = MessageBus()
+        classifier = ClassifierAgent(bus=bus, gateway=None, memory=memory)
+        classifier.classify(doc_id="doc1", filename="Company_10-K.pdf")
+        mock_store.assert_not_called()
+
+
+# ── pgvector backend selection ────────────────────────────────────────
+
+
+class TestBackendSelection:
+    def test_use_db_false_uses_in_memory(self):
+        memory = ClassificationMemory(embedding_dim=4, use_db=False)
+        assert memory._use_db is False
+        stats = memory.get_stats()
+        assert stats["vector_backend"] == "in-memory"
+
+    def test_default_no_db_url_uses_in_memory(self):
+        """When DATABASE_URL is empty, should default to in-memory."""
+        with patch("agents.classifier_agent.settings") as mock_settings:
+            mock_settings.database_url = ""
+            mock_settings.enable_neo4j = False
+            memory = ClassificationMemory(embedding_dim=4)
+            assert memory._use_db is False

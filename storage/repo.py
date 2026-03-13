@@ -279,6 +279,97 @@ def update_chunks_classification(
         )
 
 
+def insert_classification_embedding(
+    conn,
+    embedding_id: str,
+    document_type: str,
+    classification_label: str,
+    embedding: list,
+    source_doc_id: Optional[str] = None,
+) -> None:
+    """Insert a classification embedding into pgvector-backed storage."""
+    register_vector(conn)
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO classification_embeddings
+                (embedding_id, document_type, classification_label, embedding, source_doc_id)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (embedding_id) DO NOTHING
+            """,
+            (embedding_id, document_type, classification_label, embedding, source_doc_id),
+        )
+
+
+def search_classification_embeddings(
+    conn,
+    query_embedding: list,
+    top_k: int = 1,
+    threshold: float = 0.85,
+) -> List[dict]:
+    """Find most similar classification embeddings using pgvector cosine similarity.
+
+    Returns list of dicts with: embedding_id, document_type, classification_label, similarity.
+    """
+    register_vector(conn)
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT embedding_id, document_type, classification_label,
+                   1 - (embedding <=> %s::vector) AS similarity
+            FROM classification_embeddings
+            WHERE 1 - (embedding <=> %s::vector) >= %s
+            ORDER BY embedding <=> %s::vector
+            LIMIT %s
+            """,
+            (query_embedding, query_embedding, threshold, query_embedding, top_k),
+        )
+        rows = cursor.fetchall()
+    return [
+        {
+            "embedding_id": str(row[0]),
+            "document_type": row[1],
+            "classification_label": row[2],
+            "similarity": float(row[3]),
+        }
+        for row in rows
+    ]
+
+
+def fetch_all_classification_embeddings(conn) -> List[dict]:
+    """Fetch all classification embeddings for SGD retraining.
+
+    Returns list of dicts with: embedding_id, document_type, classification_label, embedding.
+    """
+    register_vector(conn)
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT embedding_id, document_type, classification_label, embedding
+            FROM classification_embeddings
+            ORDER BY created_at
+            """
+        )
+        rows = cursor.fetchall()
+    return [
+        {
+            "embedding_id": str(row[0]),
+            "document_type": row[1],
+            "classification_label": row[2],
+            "embedding": [float(x) for x in row[3]],
+        }
+        for row in rows
+    ]
+
+
+def count_classification_embeddings(conn) -> int:
+    """Count total classification embeddings in pgvector store."""
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT COUNT(*) FROM classification_embeddings")
+        row = cursor.fetchone()
+    return int(row[0] if row else 0)
+
+
 def fetch_document_fact(conn, doc_id: str, fact_name: str) -> Optional[DocumentFact]:
     with conn.cursor() as cursor:
         cursor.execute(
