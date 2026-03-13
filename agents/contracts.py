@@ -351,6 +351,38 @@ class AuditLogEntry:
     timestamp: str             # ISO 8601
 
 
+# ── Classifier Agent Contracts (§4.8) ─────────────────────────────
+
+@dataclass(frozen=True)
+class ClassificationResult:
+    """Output of the Classifier Agent — assigns document_type and classification_label."""
+    doc_id: str
+    document_type: str              # e.g. "10-K", "annual_report", "contract", "regulatory_filing"
+    classification_label: str       # e.g. "sec_filing", "basel_pillar3", "financial_statement"
+    confidence: float               # 0.0–1.0
+    classification_method: str      # "deterministic" | "llm" | "memory_match"
+    evidence_signals: Dict[str, Any] = field(default_factory=dict)  # signals used for classification
+    memory_matches: List[str] = field(default_factory=list)         # prior doc_ids that informed this
+
+
+@dataclass(frozen=True)
+class ClassificationMemoryEntry:
+    """A learned classification pattern stored in classification memory."""
+    pattern_id: str
+    document_type: str
+    classification_label: str
+    filename_pattern: Optional[str] = None
+    title_keywords: List[str] = field(default_factory=list)
+    structural_signals: Dict[str, Any] = field(default_factory=dict)
+    success_count: int = 0
+    total_count: int = 0
+    last_used: str = ""
+
+    @property
+    def accuracy(self) -> float:
+        return self.success_count / self.total_count if self.total_count > 0 else 0.0
+
+
 def new_id() -> str:
     """Generate a new UUID string."""
     return str(uuid.uuid4())

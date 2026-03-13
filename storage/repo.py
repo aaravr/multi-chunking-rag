@@ -10,11 +10,12 @@ def insert_document(conn, document: DocumentRecord) -> None:
     with conn.cursor() as cursor:
         cursor.execute(
             """
-            INSERT INTO documents (doc_id, filename, sha256, page_count)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO documents (doc_id, filename, sha256, page_count, document_type, classification_label)
+            VALUES (%s, %s, %s, %s, %s, %s)
             ON CONFLICT (doc_id) DO NOTHING
             """,
-            (document.doc_id, document.filename, document.sha256, document.page_count),
+            (document.doc_id, document.filename, document.sha256, document.page_count,
+             document.document_type, document.classification_label),
         )
 
 
@@ -164,6 +165,8 @@ def insert_chunks(conn, chunks: Iterable[ChunkRecord]) -> None:
             chunk.embedding,
             chunk.embedding_model,
             chunk.embedding_dim,
+            chunk.document_type,
+            chunk.classification_label,
         )
         for chunk in chunks
     ]
@@ -189,7 +192,9 @@ def insert_chunks(conn, chunks: Iterable[ChunkRecord]) -> None:
                 source_type,
                 embedding,
                 embedding_model,
-                embedding_dim
+                embedding_dim,
+                document_type,
+                classification_label
             )
             VALUES %s
             ON CONFLICT (doc_id, macro_id, child_id) DO NOTHING
@@ -241,6 +246,36 @@ def upsert_document_facts(conn, facts: Iterable[DocumentFact]) -> None:
                 evidence_excerpt = EXCLUDED.evidence_excerpt
             """,
             rows,
+        )
+
+
+def update_document_classification(
+    conn, doc_id: str, document_type: str, classification_label: str
+) -> None:
+    """Update the classification fields on a document after classifier agent runs."""
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE documents
+            SET document_type = %s, classification_label = %s, updated_at = now()
+            WHERE doc_id = %s
+            """,
+            (document_type, classification_label, doc_id),
+        )
+
+
+def update_chunks_classification(
+    conn, doc_id: str, document_type: str, classification_label: str
+) -> None:
+    """Propagate classification to all chunks for a document."""
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE chunks
+            SET document_type = %s, classification_label = %s
+            WHERE doc_id = %s
+            """,
+            (document_type, classification_label, doc_id),
         )
 
 

@@ -9,7 +9,10 @@ import fitz
 from azure.core.exceptions import HttpResponseError
 
 from core.config import settings
-from core.contracts import DocumentRecord, PageRecord, TriageDecision
+from core.contracts import ChunkRecord, DocumentRecord, PageRecord, TriageDecision
+from agents.classifier_agent import ClassifierAgent, get_classification_memory
+from agents.message_bus import MessageBus
+from agents.model_gateway import ModelGateway
 from embedding.late_chunking import late_chunk_embeddings
 from ingestion.canonicalize import canonicalize_document
 from core.logging import configure_logging
@@ -175,9 +178,52 @@ def ingest_and_chunk(
         child_target_tokens=child_target_tokens,
         progress_cb=progress_cb,
     )
+    # ── Classify the document (§4.8) ─────────────────────────────────
+    classification = None
+    if settings.enable_classifier:
+        classification = _classify_document(
+            doc_id=doc_id,
+            filename=filename or os.path.basename(pdf_path),
+            canonical_pages=canonical_pages,
+            page_count=len(canonical_pages),
+            progress_cb=progress_cb,
+        )
+
+    # Stamp classification on chunks before insert
+    if classification and chunks:
+        chunks = [
+            ChunkRecord(
+                chunk_id=c.chunk_id,
+                doc_id=c.doc_id,
+                page_numbers=c.page_numbers,
+                macro_id=c.macro_id,
+                child_id=c.child_id,
+                chunk_type=c.chunk_type,
+                text_content=c.text_content,
+                char_start=c.char_start,
+                char_end=c.char_end,
+                polygons=c.polygons,
+                source_type=c.source_type,
+                embedding_model=c.embedding_model,
+                embedding_dim=c.embedding_dim,
+                embedding=c.embedding,
+                heading_path=c.heading_path,
+                section_id=c.section_id,
+                document_type=classification.document_type,
+                classification_label=classification.classification_label,
+            )
+            for c in chunks
+        ]
+
     if chunks:
         with get_connection() as conn:
             repo.insert_chunks(conn, chunks)
+            if classification:
+                repo.update_document_classification(
+                    conn, doc_id,
+                    classification.document_type,
+                    classification.classification_label,
+                )
             if settings.enable_document_facts:
                 facts = extract_document_facts(doc_id, chunks)
                 repo.upsert_document_facts(conn, facts)
@@ -276,3 +322,48 @@ def _render_page_png(page: fitz.Page, zoom: float) -> bytes:
 def _write_json(path: str, payload: dict) -> None:
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=True, indent=2)
+
+
+def _classify_document(
+    doc_id: str,
+    filename: str,
+    canonical_pages: list,
+    page_count: int,
+    progress_cb=None,
+):
+    """Run the classifier agent on the document front matter.
+
+    Extracts text from the first N pages (configured by front_matter_pages)
+    and passes it to the ClassifierAgent for classification.
+    """
+    if progress_cb:
+        progress_cb("classify", 0, 1)
+
+    # Build front-matter text from first N canonical pages
+    front_matter_limit = settings.front_matter_pages
+    front_text_parts = []
+    for page in canonical_pages[:front_matter_limit]:
+        front_text_parts.append(page.text)
+    front_matter_text = "\n\n".join(front_text_parts)
+
+    # Create a lightweight classifier (no LLM gateway in basic mode)
+    bus = MessageBus()
+    gateway = None
+    try:
+        gateway = ModelGateway()
+    except Exception:
+        pass
+
+    classifier = ClassifierAgent(bus=bus, gateway=gateway)
+
+    result = classifier.classify(
+        doc_id=doc_id,
+        filename=filename,
+        front_matter_text=front_matter_text,
+        page_count=page_count,
+    )
+
+    if progress_cb:
+        progress_cb("classify_done", 1, 1)
+
+    return result

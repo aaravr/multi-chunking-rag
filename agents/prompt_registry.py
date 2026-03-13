@@ -85,6 +85,29 @@ COVERAGE_ATTRIBUTE = _register(_make_template(
 ))
 
 
+# Document classification
+CLASSIFICATION = _register(_make_template(
+    "classification",
+    "classification",
+    (
+        "You are a document classification expert. Your task is to determine the type "
+        "and category of a document based on its filename and front-matter text.\n\n"
+        "You MUST respond with a JSON object containing exactly these fields:\n"
+        '- "document_type": A specific document type identifier\n'
+        '- "classification_label": A broader category label\n'
+        '- "confidence": A float between 0 and 1\n\n'
+        "Respond with ONLY the JSON object, no other text."
+    ),
+    (
+        "Classify this document:\n\n"
+        "Filename: {filename}\n"
+        "Page count: {page_count}\n\n"
+        "Front-matter text (first pages):\n---\n{front_matter_text}\n---\n\n"
+        "Return your classification as JSON."
+    ),
+))
+
+
 def get_template(
     intent_type: str,
     coverage_subtype: Optional[str] = None,

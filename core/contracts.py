@@ -59,6 +59,8 @@ class RetrievedChunk:
     score: float
     heading_path: str
     section_id: str
+    document_type: Optional[str] = None
+    classification_label: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -67,6 +69,8 @@ class DocumentRecord:
     filename: str
     sha256: str
     page_count: int
+    document_type: Optional[str] = None
+    classification_label: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -97,6 +101,8 @@ class ChunkRecord:
     embedding: List[float]
     heading_path: str
     section_id: str
+    document_type: Optional[str] = None
+    classification_label: Optional[str] = None
 
 
 @dataclass(frozen=True)
