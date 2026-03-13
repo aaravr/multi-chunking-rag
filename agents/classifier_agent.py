@@ -1,19 +1,26 @@
 """Classifier Agent — self-learning document classification (MASTER_PROMPT §4.8).
 
 Classifies ANY document into document_type and classification_label to determine
-the processing pipeline. Uses a 4-tier classification strategy:
+the processing pipeline. Uses a 4-tier classification strategy orchestrated by
+a LangGraph StateGraph with conditional routing:
 
 1. **Deterministic rules**: Filename patterns, structural signals (fast, free)
-2. **Embedding similarity**: ModernBERT embeddings + cosine similarity against
-   prior classified documents in memory (semantic matching)
+2. **LlamaIndex similarity**: VectorStoreIndex over prior classified documents
+   with cosine similarity retrieval for semantic memory matching
 3. **Incremental classifier**: sklearn SGDClassifier with partial_fit() —
    trained online from every classification, improves over time
-4. **LLM classification**: Tier-2 model for ambiguous documents (fallback)
+4. **LLM classification**: LangChain ChatPromptTemplate + Tier-2 model for
+   ambiguous documents (fallback)
+
+Frameworks:
+- **LangGraph**: StateGraph with conditional edges for classification flow
+- **LangChain**: ChatPromptTemplate for structured LLM prompts
+- **LlamaIndex**: VectorStoreIndex for embedding-based memory retrieval
+- **sklearn**: SGDClassifier for incremental online learning
 
 Self-learning loop:
 - After each classification, the front-matter embedding + label are stored
-- The SGDClassifier is incrementally trained via partial_fit()
-- Cosine similarity against stored embeddings provides memory-based matching
+  in the LlamaIndex VectorStoreIndex and the SGDClassifier is trained
 - The orchestrator can send feedback to reinforce/correct classifications
 - Memory persists via JSON export/import (embeddings + classifier state)
 """
@@ -26,11 +33,15 @@ import re
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, TypedDict
 
 import numpy as np
+from langchain_core.prompts import ChatPromptTemplate
+from langgraph.graph import END, StateGraph
+from llama_index.core.schema import TextNode
+from llama_index.core.vector_stores.simple import SimpleVectorStore
+from llama_index.core.vector_stores.types import VectorStoreQuery
 from sklearn.linear_model import SGDClassifier
-from sklearn.preprocessing import LabelEncoder
 
 from agents.base import BaseAgent
 from agents.contracts import (
@@ -47,7 +58,6 @@ logger = logging.getLogger(__name__)
 # ── Known document type patterns (deterministic tier) ─────────────────
 
 _FILENAME_PATTERNS: List[Tuple[re.Pattern, str, str]] = [
-    # (regex, document_type, classification_label)
     (re.compile(r"10-K", re.IGNORECASE), "10-K", "sec_filing"),
     (re.compile(r"10-Q", re.IGNORECASE), "10-Q", "sec_filing"),
     (re.compile(r"20-F", re.IGNORECASE), "20-F", "sec_filing"),
@@ -67,7 +77,6 @@ _FILENAME_PATTERNS: List[Tuple[re.Pattern, str, str]] = [
 ]
 
 _CONTENT_SIGNALS: List[Tuple[re.Pattern, str, str, float]] = [
-    # (regex matching first-page text, document_type, classification_label, weight)
     (re.compile(r"UNITED STATES SECURITIES AND EXCHANGE COMMISSION", re.IGNORECASE), "sec_filing", "sec_filing", 0.95),
     (re.compile(r"ANNUAL REPORT PURSUANT TO SECTION 13", re.IGNORECASE), "10-K", "sec_filing", 0.95),
     (re.compile(r"QUARTERLY REPORT PURSUANT TO SECTION 13", re.IGNORECASE), "10-Q", "sec_filing", 0.95),
@@ -86,53 +95,84 @@ _CONTENT_SIGNALS: List[Tuple[re.Pattern, str, str, float]] = [
     (re.compile(r"Risk\s+Management\s+Report", re.IGNORECASE), "risk_report", "risk_management", 0.80),
 ]
 
-# Minimum accuracy for a memory pattern to be "trusted" (used before LLM)
 MEMORY_TRUST_THRESHOLD = 0.75
-# Minimum observations before a pattern can be trusted
 MEMORY_MIN_OBSERVATIONS = 3
-# Maximum memory entries to prevent unbounded growth
 MEMORY_MAX_ENTRIES = 10000
-# Cosine similarity threshold for embedding-based memory match
 EMBEDDING_SIMILARITY_THRESHOLD = 0.85
-# Minimum training samples before the SGD classifier is used
 SGD_MIN_SAMPLES = 5
 
 
+# ── LangChain Prompt Templates ────────────────────────────────────────
+
+CLASSIFICATION_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", (
+        "You are a document classification expert. Your task is to determine the type "
+        "and category of a document based on its filename and front-matter text.\n\n"
+        "You MUST respond with a JSON object containing exactly these fields:\n"
+        '- "document_type": A specific document type identifier (e.g., "10-K", "annual_report", '
+        '"contract", "pillar3_disclosure", "loan_agreement", "esg_report", "policy_document", '
+        '"research_paper", "invoice", "regulatory_filing")\n'
+        '- "classification_label": A broader category label (e.g., "sec_filing", "financial_report", '
+        '"legal_document", "basel_regulatory", "sustainability", "governance", "academic", '
+        '"commercial", "regulatory")\n'
+        '- "confidence": A float between 0 and 1 indicating your confidence\n\n'
+        "Respond with ONLY the JSON object, no other text."
+    )),
+    ("human", (
+        "Classify this document:\n\n"
+        "Filename: {filename}\n"
+        "Page count: {page_count}\n\n"
+        "Front-matter text (first pages):\n---\n{front_matter_text}\n---\n\n"
+        "Return your classification as JSON."
+    )),
+])
+
+
+# ── LangGraph State Definition ────────────────────────────────────────
+
+class ClassificationState(TypedDict):
+    """State passed through the LangGraph classification flow."""
+    doc_id: str
+    filename: str
+    front_matter_text: str
+    page_count: int
+    structural_signals: Dict[str, Any]
+    query_id: str
+    # Computed during flow
+    embedding: Any          # Optional[np.ndarray]
+    det_result: Any         # Optional[Tuple[str, str, float]]
+    result: Any             # Optional[ClassificationResult]
+    method: str             # which tier resolved it
+
+
+# ── Classification Memory (LlamaIndex + sklearn) ─────────────────────
+
 class ClassificationMemory:
-    """Self-learning classification memory with embeddings + incremental classifier.
+    """Self-learning classification memory using LlamaIndex + sklearn.
 
-    Two ML mechanisms for learning from past classifications:
-
-    1. **Embedding store** — stores ModernBERT embeddings of front-matter text
-       alongside their labels. New documents are compared via cosine similarity
-       to find the closest match. This provides semantic generalization beyond
-       exact keyword/filename matching.
-
-    2. **SGDClassifier** — sklearn's SGDClassifier with partial_fit() for true
-       incremental (online) learning. Trained on embeddings as features, learns
-       a linear decision boundary. Once it has seen enough samples, its
-       predictions supplement embedding similarity.
-
-    Also retains the original keyword/filename index for fast exact-match
-    lookups (free, no model inference needed).
+    - **LlamaIndex VectorStoreIndex**: stores prior classification embeddings
+      as TextNodes. Retrieval via cosine similarity replaces the hand-rolled
+      numpy cosine search.
+    - **SGDClassifier**: online learning from embeddings for trainable
+      classification beyond nearest-neighbor.
+    - **Pattern store**: keyword/filename index for zero-cost exact matches.
     """
 
     def __init__(self, embedding_dim: int = 768) -> None:
-        # Original pattern store (keyword/filename index)
-        self._patterns: Dict[str, ClassificationMemoryEntry] = {}
-        self._filename_index: Dict[str, List[str]] = defaultdict(list)
-        self._keyword_index: Dict[str, List[str]] = defaultdict(list)
-
-        # ── Embedding-based memory ────────────────────────────────────
         self._embedding_dim = embedding_dim
-        self._embeddings: List[np.ndarray] = []       # (N, embedding_dim)
-        self._embedding_labels: List[str] = []         # "doc_type::label" compound key
+
+        # ── LlamaIndex SimpleVectorStore ──────────────────────────────
+        self._index_nodes: List[TextNode] = []
+        self._vector_store: Optional[SimpleVectorStore] = None
         self._embedding_doc_types: List[str] = []
         self._embedding_class_labels: List[str] = []
+        # Keep raw embeddings for SGD + export
+        self._embeddings: List[np.ndarray] = []
+        self._embedding_labels: List[str] = []
 
-        # ── Incremental SGD classifier ────────────────────────────────
+        # ── sklearn SGD classifier ────────────────────────────────────
         self._sgd: SGDClassifier = SGDClassifier(
-            loss="modified_huber",     # outputs probability estimates
+            loss="modified_huber",
             penalty="l2",
             alpha=1e-4,
             max_iter=1,
@@ -140,12 +180,16 @@ class ClassificationMemory:
             warm_start=True,
             random_state=42,
         )
-        self._label_encoder: LabelEncoder = LabelEncoder()
         self._sgd_classes: List[str] = []
         self._sgd_fitted: bool = False
         self._sgd_sample_count: int = 0
 
-    # ── Embedding memory operations ──────────────────────────────────
+        # ── Pattern store (keyword/filename) ──────────────────────────
+        self._patterns: Dict[str, ClassificationMemoryEntry] = {}
+        self._filename_index: Dict[str, List[str]] = defaultdict(list)
+        self._keyword_index: Dict[str, List[str]] = defaultdict(list)
+
+    # ── LlamaIndex embedding operations ──────────────────────────────
 
     def store_embedding(
         self,
@@ -153,10 +197,7 @@ class ClassificationMemory:
         document_type: str,
         classification_label: str,
     ) -> None:
-        """Store a document embedding with its classification for future similarity lookups.
-
-        Also incrementally trains the SGDClassifier on this new sample.
-        """
+        """Store a document embedding in the LlamaIndex index + train SGD."""
         emb = np.asarray(embedding, dtype=np.float32).ravel()
         if emb.shape[0] != self._embedding_dim:
             logger.warning(
@@ -166,12 +207,26 @@ class ClassificationMemory:
             return
 
         compound_label = f"{document_type}::{classification_label}"
+
+        # Store in LlamaIndex as a TextNode with pre-computed embedding
+        node = TextNode(
+            text=compound_label,
+            id_=new_id(),
+            embedding=emb.tolist(),
+            metadata={
+                "document_type": document_type,
+                "classification_label": classification_label,
+            },
+        )
+        self._index_nodes.append(node)
+        self._vector_store = None  # Invalidate — rebuilt on next query
+
+        # Keep raw data for SGD + export
         self._embeddings.append(emb)
         self._embedding_labels.append(compound_label)
         self._embedding_doc_types.append(document_type)
         self._embedding_class_labels.append(classification_label)
 
-        # ── Incremental training ──────────────────────────────────────
         self._train_incremental(emb, compound_label)
 
     def lookup_by_embedding(
@@ -179,48 +234,54 @@ class ClassificationMemory:
         query_embedding: np.ndarray,
         threshold: float = EMBEDDING_SIMILARITY_THRESHOLD,
     ) -> Optional[Tuple[str, str, float]]:
-        """Find the most similar stored embedding via cosine similarity.
+        """Find the most similar stored document via LlamaIndex SimpleVectorStore.
 
-        Returns (document_type, classification_label, similarity) or None
-        if no match exceeds the threshold.
+        Uses SimpleVectorStore.add() to preserve pre-computed embeddings on
+        TextNodes, then queries with cosine similarity.
+        Returns (document_type, classification_label, similarity) or None.
         """
-        if not self._embeddings:
+        if not self._index_nodes:
             return None
 
-        query = np.asarray(query_embedding, dtype=np.float32).ravel()
-        query_norm = np.linalg.norm(query)
-        if query_norm == 0:
+        query_emb = np.asarray(query_embedding, dtype=np.float32).ravel()
+
+        # Build/rebuild the vector store lazily. SimpleVectorStore.add()
+        # preserves pre-computed embeddings on TextNodes directly, unlike
+        # VectorStoreIndex which re-embeds via the embed_model.
+        if self._vector_store is None:
+            self._vector_store = SimpleVectorStore()
+            self._vector_store.add(self._index_nodes)
+
+        try:
+            query_result = self._vector_store.query(
+                VectorStoreQuery(
+                    query_embedding=query_emb.tolist(),
+                    similarity_top_k=1,
+                )
+            )
+
+            if not query_result.ids or not query_result.similarities:
+                return None
+
+            best_sim = float(query_result.similarities[0])
+            if best_sim < threshold:
+                return None
+
+            # SimpleVectorStore returns ids, not full nodes — look up metadata
+            best_id = query_result.ids[0]
+            metadata = self._vector_store._data.metadata_dict.get(best_id, {})
+            doc_type = metadata.get("document_type", "unknown")
+            label = metadata.get("classification_label", "unclassified")
+            return (doc_type, label, best_sim)
+
+        except Exception as exc:
+            logger.warning("LlamaIndex retrieval failed: %s", exc)
             return None
-
-        # Vectorized cosine similarity against all stored embeddings
-        matrix = np.stack(self._embeddings)  # (N, dim)
-        norms = np.linalg.norm(matrix, axis=1)
-        # Avoid division by zero
-        valid = norms > 0
-        similarities = np.zeros(len(self._embeddings))
-        if valid.any():
-            similarities[valid] = (matrix[valid] @ query) / (norms[valid] * query_norm)
-
-        best_idx = int(np.argmax(similarities))
-        best_sim = float(similarities[best_idx])
-
-        if best_sim < threshold:
-            return None
-
-        return (
-            self._embedding_doc_types[best_idx],
-            self._embedding_class_labels[best_idx],
-            best_sim,
-        )
 
     def predict_sgd(
         self, query_embedding: np.ndarray
     ) -> Optional[Tuple[str, str, float]]:
-        """Use the trained SGDClassifier to predict document classification.
-
-        Returns (document_type, classification_label, confidence) or None
-        if the classifier is not ready.
-        """
+        """Use the SGDClassifier to predict classification."""
         if not self._sgd_fitted or self._sgd_sample_count < SGD_MIN_SAMPLES:
             return None
 
@@ -239,40 +300,41 @@ class ClassificationMemory:
             return None
 
     def _train_incremental(self, embedding: np.ndarray, compound_label: str) -> None:
-        """Incrementally train the SGDClassifier with a single new sample.
-
-        SGDClassifier.partial_fit() requires >= 2 distinct classes. Training
-        is deferred until we have samples from at least 2 classes, then a
-        batch fit bootstraps the classifier with all accumulated samples.
-        """
+        """Incrementally train SGDClassifier with a single new sample."""
         X = embedding.reshape(1, -1)
 
         if compound_label not in self._sgd_classes:
             self._sgd_classes.append(compound_label)
 
-        # SGDClassifier requires >= 2 classes; defer until we have them
         if len(self._sgd_classes) < 2:
             self._sgd_sample_count += 1
             return
 
-        # If this is the first time we have 2+ classes, bootstrap with all
-        # stored embeddings rather than just this one sample
         if not self._sgd_fitted and len(self._embeddings) >= 2:
             self._retrain_sgd_from_store()
             return
 
         try:
-            self._sgd.partial_fit(
-                X,
-                [compound_label],
-                classes=self._sgd_classes,
-            )
+            self._sgd.partial_fit(X, [compound_label], classes=self._sgd_classes)
             self._sgd_fitted = True
             self._sgd_sample_count += 1
         except Exception as exc:
             logger.warning("SGD incremental training failed: %s", exc)
 
-    # ── Original pattern store (keyword/filename) ─────────────────────
+    def _retrain_sgd_from_store(self) -> None:
+        """Retrain SGDClassifier from all stored embeddings."""
+        if not self._embeddings or len(self._sgd_classes) < 2:
+            return
+        X = np.stack(self._embeddings)
+        y = self._embedding_labels
+        try:
+            self._sgd.partial_fit(X, y, classes=self._sgd_classes)
+            self._sgd_fitted = True
+            self._sgd_sample_count = len(self._embeddings)
+        except Exception as exc:
+            logger.warning("SGD retrain failed: %s", exc)
+
+    # ── Pattern store operations ──────────────────────────────────────
 
     def store_pattern(
         self,
@@ -282,13 +344,7 @@ class ClassificationMemory:
         title_keywords: Optional[List[str]] = None,
         structural_signals: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Store a new classification pattern or update an existing one.
-
-        Returns the pattern_id.
-        """
-        existing = self._find_exact_match(
-            document_type, classification_label, filename
-        )
+        existing = self._find_exact_match(document_type, classification_label, filename)
         if existing:
             old = self._patterns[existing]
             updated = ClassificationMemoryEntry(
@@ -318,16 +374,12 @@ class ClassificationMemory:
             last_used=datetime.now(timezone.utc).isoformat(),
         )
         self._patterns[pattern_id] = entry
-
         if filename:
-            normalized = self._normalize_filename(filename)
-            self._filename_index[normalized].append(pattern_id)
+            self._filename_index[self._normalize_filename(filename)].append(pattern_id)
         for kw in (title_keywords or []):
             self._keyword_index[kw.lower()].append(pattern_id)
-
         if len(self._patterns) > MEMORY_MAX_ENTRIES:
             self._prune_lowest_accuracy()
-
         return pattern_id
 
     def lookup(
@@ -337,30 +389,24 @@ class ClassificationMemory:
         min_accuracy: float = MEMORY_TRUST_THRESHOLD,
         min_observations: int = MEMORY_MIN_OBSERVATIONS,
     ) -> Optional[ClassificationMemoryEntry]:
-        """Find the best matching trusted pattern from the keyword/filename index."""
         candidates: List[ClassificationMemoryEntry] = []
-
         if filename:
             normalized = self._normalize_filename(filename)
             for pid in self._filename_index.get(normalized, []):
                 entry = self._patterns.get(pid)
                 if entry and entry.total_count >= min_observations and entry.accuracy >= min_accuracy:
                     candidates.append(entry)
-
         if title_keywords:
             for kw in title_keywords:
                 for pid in self._keyword_index.get(kw.lower(), []):
                     entry = self._patterns.get(pid)
                     if entry and entry.total_count >= min_observations and entry.accuracy >= min_accuracy:
                         candidates.append(entry)
-
         if not candidates:
             return None
-
         return max(candidates, key=lambda e: (e.accuracy, e.total_count))
 
     def record_feedback(self, pattern_id: str, correct: bool) -> None:
-        """Record whether a classification was correct (reinforcement learning)."""
         entry = self._patterns.get(pattern_id)
         if not entry:
             return
@@ -378,28 +424,24 @@ class ClassificationMemory:
         self._patterns[pattern_id] = updated
 
     def get_all_patterns(self) -> List[ClassificationMemoryEntry]:
-        """Return all stored patterns (for debugging/export)."""
         return list(self._patterns.values())
 
     def get_stats(self) -> Dict[str, Any]:
-        """Return memory statistics."""
         patterns = list(self._patterns.values())
         trusted = [p for p in patterns if p.accuracy >= MEMORY_TRUST_THRESHOLD and p.total_count >= MEMORY_MIN_OBSERVATIONS]
         return {
             "total_patterns": len(patterns),
             "trusted_patterns": len(trusted),
             "total_observations": sum(p.total_count for p in patterns),
-            "avg_accuracy": (
-                sum(p.accuracy for p in patterns) / len(patterns) if patterns else 0.0
-            ),
+            "avg_accuracy": (sum(p.accuracy for p in patterns) / len(patterns) if patterns else 0.0),
             "embedding_count": len(self._embeddings),
+            "llama_index_nodes": len(self._index_nodes),
             "sgd_fitted": self._sgd_fitted,
             "sgd_sample_count": self._sgd_sample_count,
             "sgd_classes": list(self._sgd_classes),
         }
 
     def export_json(self) -> str:
-        """Export memory to JSON for persistence (patterns + embeddings + SGD state)."""
         data = {
             "patterns": [],
             "embeddings": [],
@@ -427,14 +469,10 @@ class ClassificationMemory:
         return json.dumps(data, indent=2)
 
     def import_json(self, raw: str) -> int:
-        """Import patterns + embeddings from JSON. Returns count of items loaded."""
         data = json.loads(raw)
         count = 0
-
-        # Handle both old format (list) and new format (dict with keys)
         if isinstance(data, list):
-            patterns = data
-            embeddings = []
+            patterns, embeddings = data, []
         else:
             patterns = data.get("patterns", [])
             embeddings = data.get("embeddings", [])
@@ -463,65 +501,51 @@ class ClassificationMemory:
 
         for item in embeddings:
             emb = np.array(item["embedding"], dtype=np.float32)
+            compound = f"{item['document_type']}::{item['classification_label']}"
+            node = TextNode(
+                text=compound,
+                id_=new_id(),
+                embedding=emb.tolist(),
+                metadata={
+                    "document_type": item["document_type"],
+                    "classification_label": item["classification_label"],
+                },
+            )
+            self._index_nodes.append(node)
             self._embeddings.append(emb)
             self._embedding_doc_types.append(item["document_type"])
             self._embedding_class_labels.append(item["classification_label"])
-            compound = f"{item['document_type']}::{item['classification_label']}"
             self._embedding_labels.append(compound)
             count += 1
 
-        # Retrain SGD on imported embeddings
+        self._vector_store = None  # Force rebuild
         if self._embeddings and self._sgd_classes:
             self._retrain_sgd_from_store()
-
         return count
 
-    def _retrain_sgd_from_store(self) -> None:
-        """Retrain SGDClassifier from all stored embeddings (used after import or bootstrap)."""
-        if not self._embeddings or len(self._sgd_classes) < 2:
-            return
-        X = np.stack(self._embeddings)
-        y = self._embedding_labels
-        try:
-            self._sgd.partial_fit(X, y, classes=self._sgd_classes)
-            self._sgd_fitted = True
-            self._sgd_sample_count = len(self._embeddings)
-        except Exception as exc:
-            logger.warning("SGD retrain failed: %s", exc)
-
-    def _find_exact_match(
-        self, document_type: str, classification_label: str, filename: Optional[str]
-    ) -> Optional[str]:
+    def _find_exact_match(self, document_type, classification_label, filename):
         for pid, entry in self._patterns.items():
-            if (
-                entry.document_type == document_type
-                and entry.classification_label == classification_label
-                and entry.filename_pattern == filename
-            ):
+            if entry.document_type == document_type and entry.classification_label == classification_label and entry.filename_pattern == filename:
                 return pid
         return None
 
     def _normalize_filename(self, filename: str) -> str:
         name = re.sub(r"\.[^.]+$", "", filename)
-        name = re.sub(r"[\s_-]+", " ", name.lower().strip())
-        return name
+        return re.sub(r"[\s_-]+", " ", name.lower().strip())
 
     def _prune_lowest_accuracy(self) -> None:
-        sorted_patterns = sorted(
-            self._patterns.items(),
-            key=lambda kv: (kv[1].accuracy, kv[1].total_count),
-        )
+        sorted_patterns = sorted(self._patterns.items(), key=lambda kv: (kv[1].accuracy, kv[1].total_count))
         to_remove = max(1, len(sorted_patterns) // 10)
         for pid, _ in sorted_patterns[:to_remove]:
             del self._patterns[pid]
 
 
-# Singleton memory instance
+# ── Singleton ─────────────────────────────────────────────────────────
+
 _classification_memory: Optional[ClassificationMemory] = None
 
 
 def get_classification_memory() -> ClassificationMemory:
-    """Get or create the singleton classification memory."""
     global _classification_memory
     if _classification_memory is None:
         _classification_memory = ClassificationMemory()
@@ -529,7 +553,6 @@ def get_classification_memory() -> ClassificationMemory:
 
 
 def reset_classification_memory() -> None:
-    """Reset the singleton (for testing)."""
     global _classification_memory
     _classification_memory = None
 
@@ -537,11 +560,6 @@ def reset_classification_memory() -> None:
 # ── Embedder helper ───────────────────────────────────────────────────
 
 def _get_embedder():
-    """Lazy-load the ModernBERT embedder singleton.
-
-    Returns None if the model cannot be loaded (e.g. in test environments
-    without GPU/model weights).
-    """
     try:
         from embedding.model_registry import get_embedding_model
         return get_embedding_model()
@@ -550,36 +568,258 @@ def _get_embedder():
         return None
 
 
+# ── LangGraph Node Functions ──────────────────────────────────────────
+
+def _node_compute_embedding(state: ClassificationState, embedder) -> dict:
+    """Compute the front-matter embedding for downstream tiers."""
+    text = state.get("front_matter_text", "")
+    if not text or embedder is None:
+        return {"embedding": None}
+    try:
+        sample = text[:2000]
+        vec = embedder.embed_text(sample)
+        return {"embedding": np.array(vec, dtype=np.float32)}
+    except Exception as exc:
+        logger.warning("Embedding failed: %s", exc)
+        return {"embedding": None}
+
+
+def _node_deterministic(state: ClassificationState) -> dict:
+    """Tier 1: deterministic regex classification."""
+    filename = state["filename"]
+    text = state.get("front_matter_text", "")
+    best: Optional[Tuple[str, str, float]] = None
+
+    for pattern, doc_type, label in _FILENAME_PATTERNS:
+        if pattern.search(filename):
+            if best is None or 0.80 > best[2]:
+                best = (doc_type, label, 0.80)
+
+    if text:
+        for pattern, doc_type, label, weight in _CONTENT_SIGNALS:
+            if pattern.search(text):
+                if best is None or weight > best[2]:
+                    best = (doc_type, label, weight)
+
+    if best and best[2] >= 0.85:
+        return {
+            "det_result": best,
+            "result": ClassificationResult(
+                doc_id=state["doc_id"],
+                document_type=best[0],
+                classification_label=best[1],
+                confidence=best[2],
+                classification_method="deterministic",
+                evidence_signals=state["structural_signals"],
+            ),
+            "method": "deterministic",
+        }
+    return {"det_result": best, "result": None, "method": ""}
+
+
+def _node_llama_index_similarity(state: ClassificationState, memory: ClassificationMemory) -> dict:
+    """Tier 2: LlamaIndex VectorStoreIndex cosine similarity lookup."""
+    embedding = state.get("embedding")
+    if embedding is None:
+        return {"result": None, "method": ""}
+
+    sim_result = memory.lookup_by_embedding(embedding)
+    if sim_result:
+        doc_type, label, similarity = sim_result
+        return {
+            "result": ClassificationResult(
+                doc_id=state["doc_id"],
+                document_type=doc_type,
+                classification_label=label,
+                confidence=similarity,
+                classification_method="embedding_similarity",
+                evidence_signals=state["structural_signals"],
+            ),
+            "method": "embedding_similarity",
+        }
+    return {"result": None, "method": ""}
+
+
+def _node_sgd_classifier(state: ClassificationState, memory: ClassificationMemory) -> dict:
+    """Tier 3: sklearn SGDClassifier prediction."""
+    embedding = state.get("embedding")
+    if embedding is None:
+        return {"result": None, "method": ""}
+
+    sgd_result = memory.predict_sgd(embedding)
+    if sgd_result and sgd_result[2] >= 0.6:
+        doc_type, label, confidence = sgd_result
+        return {
+            "result": ClassificationResult(
+                doc_id=state["doc_id"],
+                document_type=doc_type,
+                classification_label=label,
+                confidence=confidence,
+                classification_method="sgd_classifier",
+                evidence_signals=state["structural_signals"],
+            ),
+            "method": "sgd_classifier",
+        }
+    return {"result": None, "method": ""}
+
+
+def _node_llm_classify(state: ClassificationState, gateway: Optional[ModelGateway]) -> dict:
+    """Tier 4: LLM classification via LangChain ChatPromptTemplate."""
+    text = state.get("front_matter_text", "")
+    if not gateway or not text:
+        return {"result": None, "method": ""}
+
+    # Format prompt using LangChain template
+    messages = CLASSIFICATION_PROMPT.format_messages(
+        filename=state["filename"],
+        page_count=state["page_count"],
+        front_matter_text=text[:4000],
+    )
+
+    # Convert LangChain messages to gateway format
+    gateway_messages = [
+        {"role": "system" if m.type == "system" else "user", "content": m.content}
+        for m in messages
+    ]
+
+    try:
+        result = gateway.call_model(
+            model_id="gpt-4o-mini",
+            messages=gateway_messages,
+            temperature=0.0,
+            query_id=state.get("query_id", ""),
+            agent_id="classifier",
+            step_id=new_id(),
+        )
+        parsed = _parse_llm_response(result.get("content", ""))
+        if parsed:
+            return {
+                "result": ClassificationResult(
+                    doc_id=state["doc_id"],
+                    document_type=parsed[0],
+                    classification_label=parsed[1],
+                    confidence=parsed[2],
+                    classification_method="llm",
+                    evidence_signals=state["structural_signals"],
+                ),
+                "method": "llm",
+            }
+    except Exception as exc:
+        logger.warning("LLM classification failed: %s", exc)
+
+    return {"result": None, "method": ""}
+
+
+def _node_fallback(state: ClassificationState) -> dict:
+    """Final fallback when all tiers fail."""
+    det = state.get("det_result")
+    if det:
+        doc_type, label, confidence = det
+        method = "deterministic"
+    else:
+        doc_type, label, confidence = "unknown", "unclassified", 0.0
+        method = "default"
+
+    return {
+        "result": ClassificationResult(
+            doc_id=state["doc_id"],
+            document_type=doc_type,
+            classification_label=label,
+            confidence=confidence,
+            classification_method=method,
+            evidence_signals=state["structural_signals"],
+        ),
+        "method": method,
+    }
+
+
+def _parse_llm_response(response: str) -> Optional[Tuple[str, str, float]]:
+    """Parse LLM JSON response."""
+    try:
+        json_str = response.strip()
+        if "```" in json_str:
+            match = re.search(r"```(?:json)?\s*(.*?)```", json_str, re.DOTALL)
+            if match:
+                json_str = match.group(1).strip()
+            else:
+                return None
+        data = json.loads(json_str)
+        doc_type = data.get("document_type", "unknown")
+        label = data.get("classification_label", "unclassified")
+        confidence = float(data.get("confidence", 0.5))
+        return (doc_type, label, min(confidence, 0.95))
+    except (json.JSONDecodeError, ValueError, AttributeError) as exc:
+        logger.warning("Failed to parse LLM classification response: %s", exc)
+        return None
+
+
+# ── LangGraph Builder ─────────────────────────────────────────────────
+
+def _build_classification_graph(
+    memory: ClassificationMemory,
+    gateway: Optional[ModelGateway],
+    embedder: Any,
+) -> StateGraph:
+    """Build the LangGraph StateGraph for the classification flow.
+
+    Graph topology:
+        embed → deterministic → [resolved?] → END
+                                [not resolved?] → llama_similarity → [resolved?] → END
+                                                                      [not?] → sgd → [resolved?] → END
+                                                                                      [not?] → llm → [resolved?] → END
+                                                                                                      [not?] → fallback → END
+    Uses conditional edges to short-circuit as soon as a tier resolves.
+    """
+    graph = StateGraph(ClassificationState)
+
+    # Add nodes — each node is a lambda that closes over its dependencies
+    graph.add_node("embed", lambda s: _node_compute_embedding(s, embedder))
+    graph.add_node("deterministic", _node_deterministic)
+    graph.add_node("llama_similarity", lambda s: _node_llama_index_similarity(s, memory))
+    graph.add_node("sgd", lambda s: _node_sgd_classifier(s, memory))
+    graph.add_node("llm", lambda s: _node_llm_classify(s, gateway))
+    graph.add_node("fallback", _node_fallback)
+
+    # Conditional routing helpers
+    def _is_resolved(state: ClassificationState) -> str:
+        return "resolved" if state.get("result") is not None else "unresolved"
+
+    # Wire the graph
+    graph.set_entry_point("embed")
+    graph.add_edge("embed", "deterministic")
+
+    graph.add_conditional_edges("deterministic", _is_resolved, {
+        "resolved": END,
+        "unresolved": "llama_similarity",
+    })
+    graph.add_conditional_edges("llama_similarity", _is_resolved, {
+        "resolved": END,
+        "unresolved": "sgd",
+    })
+    graph.add_conditional_edges("sgd", _is_resolved, {
+        "resolved": END,
+        "unresolved": "llm",
+    })
+    graph.add_conditional_edges("llm", _is_resolved, {
+        "resolved": END,
+        "unresolved": "fallback",
+    })
+    graph.add_edge("fallback", END)
+
+    return graph
+
+
+# ── Classifier Agent ──────────────────────────────────────────────────
+
 class ClassifierAgent(BaseAgent):
     """Self-learning document classifier (§4.8).
 
-    Classification strategy (4-tier, cheapest first):
+    Orchestrated by a LangGraph StateGraph with conditional edges:
+    embed → deterministic → llama_similarity → sgd → llm → fallback
 
-    1. **Deterministic rules** — regex on filename and first-page content.
-       Fast, free, high confidence for known document types.
-
-    2. **Embedding similarity** — ModernBERT embeds the front-matter text,
-       cosine similarity finds the closest prior document in memory.
-
-    3. **SGD classifier** — sklearn SGDClassifier trained incrementally
-       via partial_fit() on every classification. Predicts from embeddings.
-
-    4. **LLM classification** — Tier-2 model analyzes front-matter text.
-       Used only for truly ambiguous documents.
-
-    After classification, the result + embedding are stored in memory.
-    The SGDClassifier is trained on each new sample. The orchestrator or
-    user can send feedback to reinforce/correct.
-
-    MUST:
-    - Try deterministic rules before expensive methods
-    - Store every classification in memory with its embedding
-    - Incrementally train the SGD classifier
-    - Respect token budget
-
-    MUST NOT:
-    - Call LLM when deterministic match has confidence >= 0.85
-    - Exceed 1 LLM call per classification
+    Each tier short-circuits via conditional edges when resolved.
+    Results stored in LlamaIndex VectorStoreIndex + sklearn SGDClassifier.
+    Prompts structured via LangChain ChatPromptTemplate.
     """
 
     agent_name = "classifier"
@@ -593,24 +833,26 @@ class ClassifierAgent(BaseAgent):
     ) -> None:
         super().__init__(bus, gateway)
         self._memory = memory or get_classification_memory()
-        self._embedder = embedder  # lazy-loaded if None
+        self._embedder = embedder
+        self._graph = None  # Built lazily
 
     def _get_embedder(self):
-        """Get or lazy-load the embedder."""
         if self._embedder is None:
             self._embedder = _get_embedder()
         return self._embedder
 
-    def handle_message(self, message: AgentMessage) -> ClassificationResult:
-        """Handle a classification_request message.
+    def _get_graph(self):
+        """Build or return the compiled LangGraph."""
+        if self._graph is None:
+            sg = _build_classification_graph(
+                memory=self._memory,
+                gateway=self.gateway,
+                embedder=self._get_embedder(),
+            )
+            self._graph = sg.compile()
+        return self._graph
 
-        Expected payload keys:
-            doc_id: str
-            filename: str
-            front_matter_text: str — concatenated text from first N pages
-            page_count: int
-            structural_signals: dict — optional signals from page triage
-        """
+    def handle_message(self, message: AgentMessage) -> ClassificationResult:
         payload = message.payload
         return self.classify(
             doc_id=payload["doc_id"],
@@ -630,242 +872,49 @@ class ClassifierAgent(BaseAgent):
         structural_signals: Optional[Dict[str, Any]] = None,
         query_id: str = "",
     ) -> ClassificationResult:
-        """Classify a document using the 4-tier strategy.
-
-        Returns a ClassificationResult with document_type, classification_label,
-        confidence, and the method used.
-        """
+        """Classify a document by invoking the LangGraph classification flow."""
         start = time.monotonic()
         signals = dict(structural_signals or {})
         signals["filename"] = filename
         signals["page_count"] = page_count
 
-        # ── Compute embedding (used for memory storage + tiers 2-3) ──
-        embedding = self._embed_text(front_matter_text) if front_matter_text else None
+        # Build initial state
+        initial_state: ClassificationState = {
+            "doc_id": doc_id,
+            "filename": filename,
+            "front_matter_text": front_matter_text,
+            "page_count": page_count,
+            "structural_signals": signals,
+            "query_id": query_id,
+            "embedding": None,
+            "det_result": None,
+            "result": None,
+            "method": "",
+        }
 
-        # ── Tier 1: Deterministic rules ───────────────────────────────
-        det_result = self._classify_deterministic(filename, front_matter_text)
-        if det_result and det_result[2] >= 0.85:
-            doc_type, label, confidence = det_result
-            result = ClassificationResult(
-                doc_id=doc_id,
-                document_type=doc_type,
-                classification_label=label,
-                confidence=confidence,
-                classification_method="deterministic",
-                evidence_signals=signals,
-            )
-            self._store_in_memory(result, filename, front_matter_text, embedding)
-            self._log_classification(result, start, query_id)
-            return result
+        # Run the LangGraph
+        graph = self._get_graph()
+        final_state = graph.invoke(initial_state)
 
-        # ── Tier 2: Embedding similarity ─────────────────────────────
-        if embedding is not None:
-            sim_result = self._memory.lookup_by_embedding(embedding)
-            if sim_result:
-                doc_type, label, similarity = sim_result
-                result = ClassificationResult(
-                    doc_id=doc_id,
-                    document_type=doc_type,
-                    classification_label=label,
-                    confidence=similarity,
-                    classification_method="embedding_similarity",
-                    evidence_signals=signals,
-                )
-                self._store_in_memory(result, filename, front_matter_text, embedding)
-                self._log_classification(result, start, query_id)
-                return result
+        result = final_state["result"]
+        embedding = final_state.get("embedding")
 
-        # ── Tier 3: SGD classifier ───────────────────────────────────
-        if embedding is not None:
-            sgd_result = self._memory.predict_sgd(embedding)
-            if sgd_result and sgd_result[2] >= 0.6:
-                doc_type, label, confidence = sgd_result
-                result = ClassificationResult(
-                    doc_id=doc_id,
-                    document_type=doc_type,
-                    classification_label=label,
-                    confidence=confidence,
-                    classification_method="sgd_classifier",
-                    evidence_signals=signals,
-                )
-                self._store_in_memory(result, filename, front_matter_text, embedding)
-                self._log_classification(result, start, query_id)
-                return result
-
-        # ── Tier 3.5: Keyword/filename memory match ──────────────────
-        title_keywords = self._extract_title_keywords(front_matter_text)
-        mem_match = self._memory.lookup(
-            filename=filename,
-            title_keywords=title_keywords,
-        )
-        if mem_match:
-            result = ClassificationResult(
-                doc_id=doc_id,
-                document_type=mem_match.document_type,
-                classification_label=mem_match.classification_label,
-                confidence=min(mem_match.accuracy, 0.90),
-                classification_method="memory_match",
-                evidence_signals=signals,
-                memory_matches=[mem_match.pattern_id],
-            )
-            self._memory.store_pattern(
-                document_type=mem_match.document_type,
-                classification_label=mem_match.classification_label,
-                filename=filename,
-                title_keywords=title_keywords,
-            )
-            self._log_classification(result, start, query_id)
-            return result
-
-        # ── Tier 4: LLM classification ───────────────────────────────
-        if self.gateway and front_matter_text:
-            llm_result = self._classify_with_llm(
-                doc_id=doc_id,
-                filename=filename,
-                front_matter_text=front_matter_text,
-                page_count=page_count,
-                query_id=query_id,
-            )
-            if llm_result:
-                result = ClassificationResult(
-                    doc_id=doc_id,
-                    document_type=llm_result[0],
-                    classification_label=llm_result[1],
-                    confidence=llm_result[2],
-                    classification_method="llm",
-                    evidence_signals=signals,
-                )
-                self._store_in_memory(result, filename, front_matter_text, embedding)
-                self._log_classification(result, start, query_id)
-                return result
-
-        # ── Fallback ─────────────────────────────────────────────────
-        if det_result:
-            doc_type, label, confidence = det_result
-        else:
-            doc_type, label, confidence = "unknown", "unclassified", 0.0
-
-        result = ClassificationResult(
-            doc_id=doc_id,
-            document_type=doc_type,
-            classification_label=label,
-            confidence=confidence,
-            classification_method="deterministic" if det_result else "default",
-            evidence_signals=signals,
-        )
+        # Store in memory for future learning
         self._store_in_memory(result, filename, front_matter_text, embedding)
         self._log_classification(result, start, query_id)
+
         return result
 
     def handle_feedback(self, pattern_id: str, correct: bool) -> None:
-        """Process feedback on a classification (called by orchestrator)."""
         self._memory.record_feedback(pattern_id, correct)
-        logger.info(
-            "Classification feedback: pattern=%s correct=%s",
-            pattern_id, correct,
-        )
+        logger.info("Classification feedback: pattern=%s correct=%s", pattern_id, correct)
 
     def get_memory_stats(self) -> Dict[str, Any]:
-        """Return classification memory statistics."""
         return self._memory.get_stats()
 
-    # ── Embedding helper ─────────────────────────────────────────────
-
-    def _embed_text(self, text: str) -> Optional[np.ndarray]:
-        """Embed front-matter text using the ModernBERT model.
-
-        Returns a numpy array of shape (embedding_dim,) or None if
-        the embedder is not available.
-        """
-        embedder = self._get_embedder()
-        if embedder is None:
-            return None
-        try:
-            # Truncate to first 2000 chars to keep embedding fast
-            sample = text[:2000]
-            vec = embedder.embed_text(sample)
-            return np.array(vec, dtype=np.float32)
-        except Exception as exc:
-            logger.warning("Embedding failed: %s", exc)
-            return None
-
-    # ── Tier 1: Deterministic classification ──────────────────────────
-
-    def _classify_deterministic(
-        self, filename: str, front_matter_text: str
-    ) -> Optional[Tuple[str, str, float]]:
-        """Try deterministic classification using filename and content patterns."""
-        best: Optional[Tuple[str, str, float]] = None
-
-        for pattern, doc_type, label in _FILENAME_PATTERNS:
-            if pattern.search(filename):
-                confidence = 0.80
-                if best is None or confidence > best[2]:
-                    best = (doc_type, label, confidence)
-
-        if front_matter_text:
-            for pattern, doc_type, label, weight in _CONTENT_SIGNALS:
-                if pattern.search(front_matter_text):
-                    if best is None or weight > best[2]:
-                        best = (doc_type, label, weight)
-
-        return best
-
-    # ── Tier 4: LLM classification ───────────────────────────────────
-
-    def _classify_with_llm(
-        self,
-        doc_id: str,
-        filename: str,
-        front_matter_text: str,
-        page_count: int,
-        query_id: str,
-    ) -> Optional[Tuple[str, str, float]]:
-        """Use Tier-2 LLM to classify an ambiguous document."""
-        text_sample = front_matter_text[:4000]
-        prompt = _build_classification_prompt(filename, text_sample, page_count)
-
-        try:
-            result = self.gateway.call_model(
-                model_id="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": _CLASSIFICATION_SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.0,
-                query_id=query_id,
-                agent_id=self.agent_name,
-                step_id=new_id(),
-            )
-            return self._parse_llm_response(result.get("content", ""))
-        except Exception as exc:
-            logger.warning("LLM classification failed: %s", exc)
-            return None
-
-    def _parse_llm_response(
-        self, response: str
-    ) -> Optional[Tuple[str, str, float]]:
-        """Parse the LLM classification response."""
-        try:
-            json_str = response.strip()
-            if "```" in json_str:
-                json_str = re.search(r"```(?:json)?\s*(.*?)```", json_str, re.DOTALL)
-                if json_str:
-                    json_str = json_str.group(1).strip()
-                else:
-                    return None
-
-            data = json.loads(json_str)
-            doc_type = data.get("document_type", "unknown")
-            label = data.get("classification_label", "unclassified")
-            confidence = float(data.get("confidence", 0.5))
-            return (doc_type, label, min(confidence, 0.95))
-        except (json.JSONDecodeError, ValueError, AttributeError) as exc:
-            logger.warning("Failed to parse LLM classification response: %s", exc)
-            return None
-
-    # ── Memory helpers ────────────────────────────────────────────────
+    # Expose for tests
+    def _parse_llm_response(self, response: str) -> Optional[Tuple[str, str, float]]:
+        return _parse_llm_response(response)
 
     def _store_in_memory(
         self,
@@ -874,7 +923,6 @@ class ClassifierAgent(BaseAgent):
         front_matter_text: str,
         embedding: Optional[np.ndarray] = None,
     ) -> None:
-        """Store a classification result in memory for future learning."""
         title_keywords = self._extract_title_keywords(front_matter_text)
         self._memory.store_pattern(
             document_type=result.document_type,
@@ -883,7 +931,6 @@ class ClassifierAgent(BaseAgent):
             title_keywords=title_keywords,
             structural_signals=result.evidence_signals,
         )
-        # Store embedding for similarity-based and SGD-based learning
         if embedding is not None:
             self._memory.store_embedding(
                 embedding=embedding,
@@ -892,30 +939,22 @@ class ClassifierAgent(BaseAgent):
             )
 
     def _extract_title_keywords(self, text: str) -> List[str]:
-        """Extract likely title/heading keywords from front-matter text."""
         if not text:
             return []
         sample = text[:500]
         phrases = re.findall(r"[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)+", sample)
         caps = re.findall(r"\b[A-Z]{3,}(?:\s+[A-Z]{3,})+\b", sample)
-        keywords = list(set(phrases + caps))[:10]
-        return keywords
+        return list(set(phrases + caps))[:10]
 
     def _log_classification(
         self, result: ClassificationResult, start: float, query_id: str
     ) -> None:
-        """Log the classification result and record eval metrics."""
         latency_ms = (time.monotonic() - start) * 1000
         logger.info(
             "Classifier: doc=%s type=%s label=%s conf=%.2f method=%s (%.0fms)",
-            result.doc_id,
-            result.document_type,
-            result.classification_label,
-            result.confidence,
-            result.classification_method,
-            latency_ms,
+            result.doc_id, result.document_type, result.classification_label,
+            result.confidence, result.classification_method, latency_ms,
         )
-
         from agents.agent_eval import EvalCase, get_evaluator
         get_evaluator().record(EvalCase(
             query_id=query_id or new_id(),
@@ -923,39 +962,3 @@ class ClassifierAgent(BaseAgent):
             latency_ms=latency_ms,
             answer_confidence=result.confidence,
         ))
-
-
-# ── LLM Prompt for classification ────────────────────────────────────
-
-_CLASSIFICATION_SYSTEM_PROMPT = """\
-You are a document classification expert. Your task is to determine the type \
-and category of a document based on its filename and front-matter text.
-
-You MUST respond with a JSON object containing exactly these fields:
-- "document_type": A specific document type identifier (e.g., "10-K", "annual_report", \
-"contract", "pillar3_disclosure", "loan_agreement", "esg_report", "policy_document", \
-"research_paper", "invoice", "regulatory_filing")
-- "classification_label": A broader category label (e.g., "sec_filing", "financial_report", \
-"legal_document", "basel_regulatory", "sustainability", "governance", "academic", \
-"commercial", "regulatory")
-- "confidence": A float between 0 and 1 indicating your confidence
-
-Respond with ONLY the JSON object, no other text."""
-
-
-def _build_classification_prompt(
-    filename: str, text_sample: str, page_count: int
-) -> str:
-    """Build the user prompt for LLM classification."""
-    return f"""\
-Classify this document:
-
-Filename: {filename}
-Page count: {page_count}
-
-Front-matter text (first pages):
----
-{text_sample}
----
-
-Return your classification as JSON."""
