@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import os
 import time
 import uuid
@@ -10,7 +11,7 @@ import fitz
 from azure.core.exceptions import HttpResponseError
 
 from core.config import settings
-from core.contracts import ChunkRecord, DocumentRecord, PageRecord, TriageDecision
+from core.contracts import CanonicalPage, CanonicalSpan, ChunkRecord, DocumentRecord, PageRecord, TriageDecision
 from agents.classifier_agent import ClassifierAgent, get_classification_memory
 from agents.contracts import ChunkingOutcome, PreprocessorInput
 from agents.message_bus import MessageBus
@@ -25,6 +26,8 @@ from ingestion.pdf_analysis import analyze_page
 from storage.db import get_connection
 from storage import repo
 from storage.schema_contract import check_schema_contract
+
+logger = logging.getLogger(__name__)
 
 
 def ingest_pdf(
@@ -183,8 +186,9 @@ def ingest_and_chunk(
             progress_cb=progress_cb,
         )
 
-    # ── Preprocessor: determine chunking strategy (§4.9) ─────────────
+    # ── Preprocessor: determine processing strategy (§4.9) ───────────
     preprocess_result = None
+    processing_level = "late_chunking"  # default
     if settings.enable_preprocessor:
         preprocess_result = _run_preprocessor(
             doc_id=doc_id,
@@ -193,13 +197,30 @@ def ingest_and_chunk(
             classification=classification,
             progress_cb=progress_cb,
         )
-        if preprocess_result and not preprocess_result.requires_chunking:
-            return doc_id
         if preprocess_result:
             strategy = preprocess_result.chunking_strategy
-            macro_max_tokens = strategy.macro_max_tokens
-            macro_overlap_tokens = strategy.macro_overlap_tokens
-            child_target_tokens = strategy.child_target_tokens
+            processing_level = strategy.processing_level
+
+            # ── Skip: nothing to do ──────────────────────────────
+            if processing_level == "skip":
+                return doc_id
+
+            # ── Metadata-only: extract text and facts, no chunking ──
+            if processing_level == "metadata_only":
+                _process_metadata_only(
+                    doc_id=doc_id,
+                    pdf_path=pdf_path,
+                    pages=pages,
+                    classification=classification,
+                    progress_cb=progress_cb,
+                )
+                return doc_id
+
+            # For chunking levels, apply strategy parameters
+            if processing_level == "late_chunking":
+                macro_max_tokens = strategy.macro_max_tokens
+                macro_overlap_tokens = strategy.macro_overlap_tokens
+                child_target_tokens = strategy.child_target_tokens
 
     canonical_pages = canonicalize_document(
         doc_id=doc_id,
@@ -222,13 +243,22 @@ def ingest_and_chunk(
     if progress_cb:
         progress_cb("embed", 0, len(canonical_pages))
     chunk_start_time = time.monotonic()
-    chunks = late_chunk_embeddings(
-        canonical_pages,
-        macro_max_tokens=macro_max_tokens,
-        macro_overlap_tokens=macro_overlap_tokens,
-        child_target_tokens=child_target_tokens,
-        progress_cb=progress_cb,
-    )
+
+    # ── Select chunking method based on processing level ─────────────
+    if processing_level == "single_chunk":
+        chunks = _build_single_chunk(doc_id, canonical_pages)
+    elif processing_level == "page_level":
+        chunks = _build_page_level_chunks(doc_id, canonical_pages)
+    else:
+        # Default: full late chunking
+        chunks = late_chunk_embeddings(
+            canonical_pages,
+            macro_max_tokens=macro_max_tokens,
+            macro_overlap_tokens=macro_overlap_tokens,
+            child_target_tokens=child_target_tokens,
+            progress_cb=progress_cb,
+        )
+
     chunk_elapsed_ms = (time.monotonic() - chunk_start_time) * 1000
 
     # Stamp classification on chunks before insert
@@ -271,7 +301,7 @@ def ingest_and_chunk(
                 repo.upsert_document_facts(conn, facts)
             conn.commit()
 
-    # ── Record chunking outcome for preprocessor learning (§4.9) ─────
+    # ── Record processing outcome for preprocessor learning (§4.9) ───
     if settings.enable_preprocessor and preprocess_result and chunks:
         _record_chunking_outcome(
             doc_id=doc_id,
@@ -532,6 +562,194 @@ def _build_triage_summary(pages: list) -> dict:
         "di_page_ratio": di_pages / page_count,
         "page_count": page_count,
     }
+
+
+def _process_metadata_only(
+    doc_id: str,
+    pdf_path: str,
+    pages: list,
+    classification,
+    progress_cb=None,
+) -> None:
+    """Extract text and store as document facts without chunking or embedding.
+
+    Used for simple identity/proof documents (passports, driving licences,
+    utility bills) where semantic search is unnecessary — just extract
+    structured metadata fields.
+    """
+    if progress_cb:
+        progress_cb("metadata_only", 0, 1)
+
+    # Extract all text from the PDF for fact extraction
+    import fitz as fitz_mod
+    pdf = fitz_mod.open(pdf_path)
+    all_text = ""
+    try:
+        for i in range(pdf.page_count):
+            page = pdf.load_page(i)
+            all_text += (page.get_text("text") or "") + "\n"
+    finally:
+        pdf.close()
+
+    with get_connection() as conn:
+        if classification:
+            repo.update_document_classification(
+                conn, doc_id,
+                classification.document_type,
+                classification.classification_label,
+            )
+        if settings.enable_document_facts and all_text.strip():
+            # Create a minimal single-chunk representation for fact extraction
+            # without storing it as an actual searchable chunk
+            from core.contracts import ChunkRecord
+            pseudo_chunk = ChunkRecord(
+                chunk_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{doc_id}:metadata")),
+                doc_id=doc_id,
+                page_numbers=list(range(1, len(pages) + 1)),
+                macro_id=0,
+                child_id=0,
+                chunk_type="narrative",
+                text_content=all_text[:10000],
+                char_start=0,
+                char_end=len(all_text[:10000]),
+                polygons=[],
+                source_type="native",
+                embedding_model=settings.embedding_model,
+                embedding_dim=settings.embedding_dim,
+                embedding=[],
+                heading_path="",
+                section_id="",
+                document_type=classification.document_type if classification else None,
+                classification_label=classification.classification_label if classification else None,
+            )
+            facts = extract_document_facts(doc_id, [pseudo_chunk])
+            repo.upsert_document_facts(conn, facts)
+        conn.commit()
+
+    if progress_cb:
+        progress_cb("metadata_only_done", 1, 1)
+
+    logger.info(
+        "Processed doc %s as metadata_only (%d pages, %d chars text)",
+        doc_id, len(pages), len(all_text.strip()),
+    )
+
+
+def _build_single_chunk(
+    doc_id: str,
+    canonical_pages: List[CanonicalPage],
+) -> List[ChunkRecord]:
+    """Build a single chunk from the entire document text.
+
+    For short, simple documents (1-3 pages) where splitting would lose
+    context.  Embeds the concatenated text as one vector.
+    """
+    from embedding.model_registry import get_embedding_model
+
+    all_text = "\n\n".join(p.text for p in canonical_pages if p.text)
+    if not all_text.strip():
+        return []
+
+    embedder = get_embedding_model()
+    embedding = embedder.embed_text(all_text[:8192 * 4])  # safety limit
+
+    # Collect lineage from all pages
+    all_pages = sorted({p.page_number for p in canonical_pages})
+    all_polygons: list = []
+    source_type = "native"
+    heading_path = ""
+    section_id = ""
+    for page in canonical_pages:
+        for span in page.spans:
+            all_polygons.extend(span.polygons)
+            if span.source_type == "di":
+                source_type = "di"
+            if span.heading_path and not heading_path:
+                heading_path = span.heading_path
+            if span.section_id and not section_id:
+                section_id = span.section_id
+
+    chunk = ChunkRecord(
+        chunk_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{doc_id}:single:0")),
+        doc_id=doc_id,
+        page_numbers=all_pages,
+        macro_id=0,
+        child_id=0,
+        chunk_type="narrative",
+        text_content=all_text,
+        char_start=0,
+        char_end=len(all_text),
+        polygons=all_polygons[:100],  # limit polygon count
+        source_type=source_type,
+        embedding_model=settings.embedding_model,
+        embedding_dim=settings.embedding_dim,
+        embedding=embedding,
+        heading_path=heading_path,
+        section_id=section_id,
+        document_type=None,
+        classification_label=None,
+    )
+    return [chunk]
+
+
+def _build_page_level_chunks(
+    doc_id: str,
+    canonical_pages: List[CanonicalPage],
+) -> List[ChunkRecord]:
+    """Build one chunk per page with independent embeddings.
+
+    For moderately simple documents (bank statements, certificates) where
+    late chunking overhead is unnecessary.  Each page gets its own
+    embedding vector.
+    """
+    from embedding.model_registry import get_embedding_model
+
+    embedder = get_embedding_model()
+    chunks: List[ChunkRecord] = []
+
+    for page_idx, page in enumerate(canonical_pages):
+        if not page.text or not page.text.strip():
+            continue
+
+        embedding = embedder.embed_text(page.text)
+
+        # Collect lineage from page spans
+        page_polygons: list = []
+        source_type = "native"
+        heading_path = ""
+        section_id = ""
+        for span in page.spans:
+            page_polygons.extend(span.polygons)
+            if span.source_type == "di":
+                source_type = "di"
+            if span.heading_path and not heading_path:
+                heading_path = span.heading_path
+            if span.section_id and not section_id:
+                section_id = span.section_id
+
+        chunk = ChunkRecord(
+            chunk_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{doc_id}:page:{page.page_number}")),
+            doc_id=doc_id,
+            page_numbers=[page.page_number],
+            macro_id=page_idx,
+            child_id=0,
+            chunk_type="narrative",
+            text_content=page.text,
+            char_start=0,
+            char_end=len(page.text),
+            polygons=page_polygons[:50],  # limit polygon count per page
+            source_type=source_type,
+            embedding_model=settings.embedding_model,
+            embedding_dim=settings.embedding_dim,
+            embedding=embedding,
+            heading_path=heading_path,
+            section_id=section_id,
+            document_type=None,
+            classification_label=None,
+        )
+        chunks.append(chunk)
+
+    return chunks
 
 
 def _record_chunking_outcome(

@@ -387,8 +387,24 @@ class ClassificationMemoryEntry:
 
 @dataclass(frozen=True)
 class ChunkingStrategy:
-    """Defines HOW a document should be chunked."""
+    """Defines HOW a document should be chunked.
+
+    processing_level controls the depth of processing:
+    - ``skip``: No processing at all (empty/corrupt documents).
+    - ``metadata_only``: Extract text and store as document facts; no
+      chunking or embedding.  Suitable for identity documents (passport,
+      driving licence) and simple proof-of-existence documents.
+    - ``single_chunk``: Embed the entire document as one chunk.  For
+      short, simple documents (1-3 pages) where splitting would lose
+      context.
+    - ``page_level``: One chunk per page with independent embeddings.
+      No macro/child late-chunking overhead.  For moderately simple
+      multi-page documents (bank statements, certificates).
+    - ``late_chunking``: Full macro → child late-chunking pipeline with
+      configurable token windows.  For complex, long-form documents.
+    """
     strategy_name: str              # "late_chunking" | "table_aware" | "contract_clause" | "regulatory_section" | "skip"
+    processing_level: str = "late_chunking"  # "skip" | "metadata_only" | "single_chunk" | "page_level" | "late_chunking"
     macro_max_tokens: int = 8192
     macro_overlap_tokens: int = 256
     child_target_tokens: int = 256

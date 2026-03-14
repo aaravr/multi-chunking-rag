@@ -63,41 +63,159 @@ logger = logging.getLogger(__name__)
 # ── Known document type patterns (deterministic tier) ─────────────────
 
 _FILENAME_PATTERNS: List[Tuple[re.Pattern, str, str]] = [
+    # ── SEC filings ──────────────────────────────────────────────────
     (re.compile(r"10-K", re.IGNORECASE), "10-K", "sec_filing"),
     (re.compile(r"10-Q", re.IGNORECASE), "10-Q", "sec_filing"),
     (re.compile(r"20-F", re.IGNORECASE), "20-F", "sec_filing"),
     (re.compile(r"8-K", re.IGNORECASE), "8-K", "sec_filing"),
+    (re.compile(r"proxy[\s_-]?statement|DEF[\s_-]?14A", re.IGNORECASE), "proxy_statement", "sec_filing"),
+    # ── Financial reports ────────────────────────────────────────────
     (re.compile(r"annual[\s_-]?report", re.IGNORECASE), "annual_report", "financial_report"),
     (re.compile(r"interim[\s_-]?report", re.IGNORECASE), "interim_report", "financial_report"),
     (re.compile(r"quarterly[\s_-]?report", re.IGNORECASE), "quarterly_report", "financial_report"),
+    (re.compile(r"financial[\s_-]?statement", re.IGNORECASE), "financial_statement", "financial_report"),
+    # ── Regulatory ───────────────────────────────────────────────────
     (re.compile(r"pillar\s*3", re.IGNORECASE), "pillar3_disclosure", "basel_regulatory"),
     (re.compile(r"basel", re.IGNORECASE), "regulatory_disclosure", "basel_regulatory"),
-    (re.compile(r"proxy[\s_-]?statement", re.IGNORECASE), "proxy_statement", "sec_filing"),
-    (re.compile(r"prospectus", re.IGNORECASE), "prospectus", "offering_document"),
-    (re.compile(r"contract|agreement", re.IGNORECASE), "contract", "legal_document"),
+    # ── Identity & KYC ───────────────────────────────────────────────
+    (re.compile(r"passport", re.IGNORECASE), "passport", "identity_document"),
+    (re.compile(r"driv(?:ing|er).?s?\s*licen[cs]e", re.IGNORECASE), "driving_licence", "identity_document"),
+    (re.compile(r"national[\s_-]?id", re.IGNORECASE), "national_id", "identity_document"),
+    (re.compile(r"visa", re.IGNORECASE), "visa", "identity_document"),
+    (re.compile(r"kyc[\s_-]?form", re.IGNORECASE), "kyc_form", "identity_document"),
+    (re.compile(r"beneficial[\s_-]?ownership", re.IGNORECASE), "beneficial_ownership", "identity_document"),
+    (re.compile(r"sanctions[\s_-]?screening", re.IGNORECASE), "sanctions_screening", "identity_document"),
+    (re.compile(r"pep[\s_-]?declaration", re.IGNORECASE), "pep_declaration", "identity_document"),
+    # ── Proof & certificates ─────────────────────────────────────────
+    (re.compile(r"utility[\s_-]?bill", re.IGNORECASE), "utility_bill", "proof_document"),
+    (re.compile(r"proof[\s_-]?of[\s_-]?address", re.IGNORECASE), "proof_of_address", "proof_document"),
+    (re.compile(r"certificate[\s_-]?of[\s_-]?incorporat", re.IGNORECASE), "certificate_of_incorporation", "proof_document"),
+    (re.compile(r"(?:certificate[\s_-]?of[\s_-]?)?good[\s_-]?standing", re.IGNORECASE), "certificate_of_good_standing", "proof_document"),
+    (re.compile(r"certificate[\s_-]?of[\s_-]?incumbency", re.IGNORECASE), "certificate_of_incumbency", "proof_document"),
+    # ── Corporate governance ─────────────────────────────────────────
+    (re.compile(r"board[\s_-]?resolution", re.IGNORECASE), "board_resolution", "corporate_governance"),
+    (re.compile(r"power[\s_-]?of[\s_-]?attorney", re.IGNORECASE), "power_of_attorney", "corporate_governance"),
+    (re.compile(r"signing[\s_-]?authority", re.IGNORECASE), "signing_authority", "corporate_governance"),
+    (re.compile(r"articles[\s_-]?of[\s_-]?association", re.IGNORECASE), "articles_of_association", "corporate_governance"),
+    (re.compile(r"shareholder[\s_-]?register", re.IGNORECASE), "shareholder_register", "corporate_governance"),
+    (re.compile(r"corporate[\s_-]?structure", re.IGNORECASE), "corporate_structure_chart", "corporate_governance"),
+    # ── Trading agreements ───────────────────────────────────────────
+    (re.compile(r"ISDA[\s_-]?(?:master|schedule)", re.IGNORECASE), "isda_master_agreement", "trading_agreement"),
+    (re.compile(r"credit[\s_-]?support[\s_-]?annex|CSA", re.IGNORECASE), "credit_support_annex", "trading_agreement"),
+    (re.compile(r"GMRA|master[\s_-]?repurchase", re.IGNORECASE), "gmra", "trading_agreement"),
+    (re.compile(r"GMSLA|securities[\s_-]?lending", re.IGNORECASE), "gmsla", "trading_agreement"),
+    (re.compile(r"prime[\s_-]?brokerage", re.IGNORECASE), "prime_brokerage_agreement", "trading_agreement"),
+    (re.compile(r"futures[\s_-]?(?:agreement|clearing)", re.IGNORECASE), "futures_agreement", "trading_agreement"),
+    # ── Credit & lending ─────────────────────────────────────────────
+    (re.compile(r"credit[\s_-]?agreement", re.IGNORECASE), "credit_agreement", "credit_facility"),
+    (re.compile(r"facility[\s_-]?agreement", re.IGNORECASE), "facility_agreement", "credit_facility"),
     (re.compile(r"loan[\s_-]?agreement", re.IGNORECASE), "loan_agreement", "legal_document"),
+    (re.compile(r"term[\s_-]?sheet", re.IGNORECASE), "term_sheet", "deal_document"),
+    (re.compile(r"commitment[\s_-]?letter", re.IGNORECASE), "commitment_letter", "deal_document"),
+    (re.compile(r"security[\s_-]?agreement", re.IGNORECASE), "security_agreement", "credit_facility"),
+    (re.compile(r"guarantee", re.IGNORECASE), "guarantee", "credit_facility"),
+    (re.compile(r"intercreditor", re.IGNORECASE), "intercreditor_agreement", "credit_facility"),
+    # ── Capital markets ──────────────────────────────────────────────
+    (re.compile(r"prospectus", re.IGNORECASE), "prospectus", "offering_document"),
+    (re.compile(r"offering[\s_-]?memorandum|offering[\s_-]?circular", re.IGNORECASE), "offering_memorandum", "offering_document"),
+    (re.compile(r"pricing[\s_-]?supplement", re.IGNORECASE), "pricing_supplement", "offering_document"),
+    (re.compile(r"(?:base|supplemental)[\s_-]?indenture", re.IGNORECASE), "base_indenture", "offering_document"),
     (re.compile(r"indenture", re.IGNORECASE), "indenture", "legal_document"),
-    (re.compile(r"policy", re.IGNORECASE), "policy_document", "governance"),
+    # ── Fund documents ───────────────────────────────────────────────
+    (re.compile(r"fund[\s_-]?prospectus", re.IGNORECASE), "fund_prospectus", "fund_document"),
+    (re.compile(r"private[\s_-]?placement[\s_-]?memorandum|PPM", re.IGNORECASE), "private_placement_memorandum", "fund_document"),
+    (re.compile(r"subscription[\s_-]?agreement", re.IGNORECASE), "subscription_agreement", "fund_document"),
+    (re.compile(r"side[\s_-]?letter", re.IGNORECASE), "side_letter", "fund_document"),
+    (re.compile(r"limited[\s_-]?partnership[\s_-]?agreement|LPA", re.IGNORECASE), "limited_partnership_agreement", "fund_document"),
+    # ── Compliance & certificates ────────────────────────────────────
+    (re.compile(r"officer[\s_-]?certificate", re.IGNORECASE), "officer_certificate", "compliance_document"),
+    (re.compile(r"compliance[\s_-]?certificate", re.IGNORECASE), "compliance_certificate", "compliance_document"),
+    (re.compile(r"legal[\s_-]?opinion", re.IGNORECASE), "legal_opinion", "compliance_document"),
+    (re.compile(r"auditor.?s?[\s_-]?report", re.IGNORECASE), "auditor_report", "compliance_document"),
+    # ── Valuation & analysis ─────────────────────────────────────────
+    (re.compile(r"valuation[\s_-]?report", re.IGNORECASE), "valuation_report", "analysis_document"),
+    (re.compile(r"appraisal", re.IGNORECASE), "appraisal", "analysis_document"),
+    (re.compile(r"fairness[\s_-]?opinion", re.IGNORECASE), "fairness_opinion", "analysis_document"),
+    (re.compile(r"research[\s_-]?report", re.IGNORECASE), "research_report", "analysis_document"),
+    # ── Insurance ────────────────────────────────────────────────────
+    (re.compile(r"insurance[\s_-]?certificate", re.IGNORECASE), "insurance_certificate", "insurance_document"),
+    (re.compile(r"insurance[\s_-]?policy", re.IGNORECASE), "insurance_policy", "insurance_document"),
+    # ── Bank statements & tax ────────────────────────────────────────
+    (re.compile(r"bank[\s_-]?statement", re.IGNORECASE), "bank_statement", "financial_statement_simple"),
+    (re.compile(r"tax[\s_-]?return", re.IGNORECASE), "tax_return", "financial_statement_simple"),
+    (re.compile(r"pay[\s_-]?slip|payslip", re.IGNORECASE), "pay_slip", "financial_statement_simple"),
+    # ── Correspondence ───────────────────────────────────────────────
+    (re.compile(r"waiver[\s_-]?letter", re.IGNORECASE), "waiver_letter", "correspondence"),
+    (re.compile(r"consent[\s_-]?letter", re.IGNORECASE), "consent_letter", "correspondence"),
+    (re.compile(r"amendment", re.IGNORECASE), "amendment", "legal_document"),
+    (re.compile(r"NDA|non[\s_-]?disclosure", re.IGNORECASE), "nda", "legal_document"),
+    (re.compile(r"engagement[\s_-]?letter", re.IGNORECASE), "engagement_letter", "legal_document"),
+    (re.compile(r"fee[\s_-]?letter", re.IGNORECASE), "fee_letter", "deal_document"),
+    # ── ESG ──────────────────────────────────────────────────────────
     (re.compile(r"esg|sustainability", re.IGNORECASE), "esg_report", "sustainability"),
+    # ── Generic fallbacks (lowest priority — listed last) ────────────
+    (re.compile(r"contract|agreement", re.IGNORECASE), "contract", "legal_document"),
+    (re.compile(r"policy", re.IGNORECASE), "policy_document", "governance"),
 ]
 
 _CONTENT_SIGNALS: List[Tuple[re.Pattern, str, str, float]] = [
+    # ── SEC filings ──────────────────────────────────────────────────
     (re.compile(r"UNITED STATES SECURITIES AND EXCHANGE COMMISSION", re.IGNORECASE), "sec_filing", "sec_filing", 0.95),
     (re.compile(r"ANNUAL REPORT PURSUANT TO SECTION 13", re.IGNORECASE), "10-K", "sec_filing", 0.95),
     (re.compile(r"QUARTERLY REPORT PURSUANT TO SECTION 13", re.IGNORECASE), "10-Q", "sec_filing", 0.95),
     (re.compile(r"Form\s+10-K", re.IGNORECASE), "10-K", "sec_filing", 0.90),
     (re.compile(r"Form\s+10-Q", re.IGNORECASE), "10-Q", "sec_filing", 0.90),
     (re.compile(r"Form\s+20-F", re.IGNORECASE), "20-F", "sec_filing", 0.90),
+    # ── Regulatory ───────────────────────────────────────────────────
     (re.compile(r"Pillar\s*3\s+Disclosures?", re.IGNORECASE), "pillar3_disclosure", "basel_regulatory", 0.90),
     (re.compile(r"Basel\s+III", re.IGNORECASE), "regulatory_disclosure", "basel_regulatory", 0.80),
     (re.compile(r"Capital\s+Adequacy\s+Report", re.IGNORECASE), "capital_adequacy_report", "basel_regulatory", 0.85),
+    # ── Financial reports ────────────────────────────────────────────
     (re.compile(r"Annual\s+Report\s+(?:and\s+)?(?:Financial\s+Statements?|Accounts)", re.IGNORECASE), "annual_report", "financial_report", 0.90),
     (re.compile(r"Consolidated\s+Financial\s+Statements?", re.IGNORECASE), "financial_statements", "financial_report", 0.80),
     (re.compile(r"Independent\s+Auditor.?s?\s+Report", re.IGNORECASE), "audited_report", "financial_report", 0.70),
+    # ── Trading agreements ───────────────────────────────────────────
+    (re.compile(r"ISDA\s+(?:\d{4}\s+)?Master\s+Agreement", re.IGNORECASE), "isda_master_agreement", "trading_agreement", 0.95),
+    (re.compile(r"Credit\s+Support\s+Annex", re.IGNORECASE), "credit_support_annex", "trading_agreement", 0.95),
+    (re.compile(r"Global\s+Master\s+Repurchase\s+Agreement", re.IGNORECASE), "gmra", "trading_agreement", 0.95),
+    (re.compile(r"Global\s+Master\s+Securities\s+Lending\s+Agreement", re.IGNORECASE), "gmsla", "trading_agreement", 0.95),
+    (re.compile(r"Prime\s+Brokerage\s+Agreement", re.IGNORECASE), "prime_brokerage_agreement", "trading_agreement", 0.90),
+    (re.compile(r"International\s+Swaps?\s+and\s+Derivatives?\s+Association", re.IGNORECASE), "isda_master_agreement", "trading_agreement", 0.90),
+    # ── Credit & lending ─────────────────────────────────────────────
+    (re.compile(r"CREDIT\s+AGREEMENT", re.IGNORECASE), "credit_agreement", "credit_facility", 0.90),
+    (re.compile(r"FACILITY\s+AGREEMENT", re.IGNORECASE), "facility_agreement", "credit_facility", 0.90),
+    (re.compile(r"LOAN\s+AGREEMENT", re.IGNORECASE), "loan_agreement", "legal_document", 0.90),
+    (re.compile(r"(?:financial|affirmative|negative)\s+covenants?", re.IGNORECASE), "credit_agreement", "credit_facility", 0.75),
+    (re.compile(r"GUARANTEE\s+AGREEMENT|GUARANTY", re.IGNORECASE), "guarantee", "credit_facility", 0.85),
+    (re.compile(r"INTERCREDITOR\s+AGREEMENT", re.IGNORECASE), "intercreditor_agreement", "credit_facility", 0.90),
+    (re.compile(r"SECURITY\s+AGREEMENT|PLEDGE\s+AGREEMENT", re.IGNORECASE), "security_agreement", "credit_facility", 0.85),
+    # ── Capital markets ──────────────────────────────────────────────
+    (re.compile(r"OFFERING\s+MEMORANDUM|OFFERING\s+CIRCULAR", re.IGNORECASE), "offering_memorandum", "offering_document", 0.90),
+    (re.compile(r"PRIVATE\s+PLACEMENT\s+MEMORANDUM", re.IGNORECASE), "private_placement_memorandum", "fund_document", 0.90),
+    (re.compile(r"PRICING\s+SUPPLEMENT", re.IGNORECASE), "pricing_supplement", "offering_document", 0.90),
+    (re.compile(r"SUBSCRIPTION\s+AGREEMENT", re.IGNORECASE), "subscription_agreement", "fund_document", 0.85),
+    (re.compile(r"LIMITED\s+PARTNERSHIP\s+AGREEMENT", re.IGNORECASE), "limited_partnership_agreement", "fund_document", 0.90),
+    # ── Corporate governance ─────────────────────────────────────────
+    (re.compile(r"BOARD\s+(?:OF\s+DIRECTORS?\s+)?RESOLUTION", re.IGNORECASE), "board_resolution", "corporate_governance", 0.90),
+    (re.compile(r"POWER\s+OF\s+ATTORNEY", re.IGNORECASE), "power_of_attorney", "corporate_governance", 0.90),
+    (re.compile(r"CERTIFICATE\s+OF\s+INCORPORATION", re.IGNORECASE), "certificate_of_incorporation", "proof_document", 0.95),
+    (re.compile(r"CERTIFICATE\s+OF\s+GOOD\s+STANDING", re.IGNORECASE), "certificate_of_good_standing", "proof_document", 0.95),
+    (re.compile(r"ARTICLES\s+OF\s+ASSOCIATION", re.IGNORECASE), "articles_of_association", "corporate_governance", 0.90),
+    # ── Legal ────────────────────────────────────────────────────────
     (re.compile(r"THIS\s+(?:AGREEMENT|CONTRACT)\s+is\s+(?:made|entered)", re.IGNORECASE), "contract", "legal_document", 0.90),
+    (re.compile(r"NON-DISCLOSURE\s+AGREEMENT|CONFIDENTIALITY\s+AGREEMENT", re.IGNORECASE), "nda", "legal_document", 0.90),
+    (re.compile(r"ENGAGEMENT\s+LETTER", re.IGNORECASE), "engagement_letter", "legal_document", 0.85),
+    # ── Compliance ───────────────────────────────────────────────────
+    (re.compile(r"OFFICER.?S?\s+CERTIFICATE", re.IGNORECASE), "officer_certificate", "compliance_document", 0.85),
+    (re.compile(r"COMPLIANCE\s+CERTIFICATE", re.IGNORECASE), "compliance_certificate", "compliance_document", 0.85),
+    (re.compile(r"LEGAL\s+OPINION", re.IGNORECASE), "legal_opinion", "compliance_document", 0.85),
+    # ── ESG ──────────────────────────────────────────────────────────
     (re.compile(r"Environmental,?\s*Social\s+and\s+Governance", re.IGNORECASE), "esg_report", "sustainability", 0.85),
     (re.compile(r"Sustainability\s+Report", re.IGNORECASE), "esg_report", "sustainability", 0.85),
     (re.compile(r"Risk\s+Management\s+Report", re.IGNORECASE), "risk_report", "risk_management", 0.80),
+    # ── Insurance ────────────────────────────────────────────────────
+    (re.compile(r"CERTIFICATE\s+OF\s+INSURANCE", re.IGNORECASE), "insurance_certificate", "insurance_document", 0.90),
+    (re.compile(r"INSURANCE\s+POLICY", re.IGNORECASE), "insurance_policy", "insurance_document", 0.85),
 ]
 
 MEMORY_TRUST_THRESHOLD = 0.75
