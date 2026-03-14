@@ -244,19 +244,26 @@ def ingest_and_chunk(
         progress_cb("embed", 0, len(canonical_pages))
     chunk_start_time = time.monotonic()
 
-    # ── Select chunking method based on processing level ─────────────
+    # ── Select chunking method based on processing level + strategy ───
     if processing_level == "single_chunk":
         chunks = _build_single_chunk(doc_id, canonical_pages)
     elif processing_level == "page_level":
         chunks = _build_page_level_chunks(doc_id, canonical_pages)
     else:
-        # Default: full late chunking
-        chunks = late_chunk_embeddings(
-            canonical_pages,
+        # Check if the strategy_name maps to a registered chunking strategy
+        strategy_name = (
+            preprocess_result.chunking_strategy.strategy_name
+            if preprocess_result else ""
+        )
+        chunks = _dispatch_chunking_strategy(
+            doc_id=doc_id,
+            canonical_pages=canonical_pages,
+            strategy_name=strategy_name,
             macro_max_tokens=macro_max_tokens,
             macro_overlap_tokens=macro_overlap_tokens,
             child_target_tokens=child_target_tokens,
             progress_cb=progress_cb,
+            gateway=_get_gateway_if_needed(strategy_name),
         )
 
     chunk_elapsed_ms = (time.monotonic() - chunk_start_time) * 1000
@@ -562,6 +569,55 @@ def _build_triage_summary(pages: list) -> dict:
         "di_page_ratio": di_pages / page_count,
         "page_count": page_count,
     }
+
+
+def _get_gateway_if_needed(strategy_name: str):
+    """Create a ModelGateway only for LLM-dependent strategies."""
+    if strategy_name in ("proposition", "summary_indexed"):
+        try:
+            return ModelGateway()
+        except Exception:
+            return None
+    return None
+
+
+def _dispatch_chunking_strategy(
+    doc_id: str,
+    canonical_pages: list,
+    strategy_name: str,
+    macro_max_tokens: int,
+    macro_overlap_tokens: int,
+    child_target_tokens: int,
+    progress_cb=None,
+    gateway=None,
+) -> List[ChunkRecord]:
+    """Dispatch to the appropriate chunking strategy by strategy_name.
+
+    Checks the strategy registry from ``embedding.chunking_strategies``
+    first.  If the strategy_name is not a registered alternative strategy
+    (i.e. it's a parameter preset like "sec_filing" or "financial_report"),
+    falls back to the standard late_chunk_embeddings pipeline.
+    """
+    from embedding.chunking_strategies import get_strategy_dispatch
+
+    dispatch = get_strategy_dispatch()
+    strategy_fn = dispatch.get(strategy_name)
+
+    if strategy_fn is not None:
+        kwargs: dict = {}
+        # Pass gateway for LLM-dependent strategies
+        if strategy_name in ("proposition", "summary_indexed"):
+            kwargs["gateway"] = gateway
+        return strategy_fn(doc_id, canonical_pages, **kwargs)
+
+    # Default: standard late chunking with strategy parameters
+    return late_chunk_embeddings(
+        canonical_pages,
+        macro_max_tokens=macro_max_tokens,
+        macro_overlap_tokens=macro_overlap_tokens,
+        child_target_tokens=child_target_tokens,
+        progress_cb=progress_cb,
+    )
 
 
 def _process_metadata_only(

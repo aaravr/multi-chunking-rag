@@ -316,7 +316,7 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
                   "page-level extraction with table awareness.",
     ),
     "articles_of_association": ChunkingStrategy(
-        strategy_name="corporate_governance",
+        strategy_name="clause_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=128,
@@ -324,7 +324,7 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
         table_extraction="none",
         heading_aware=True,
         rationale="Articles of association are clause-structured legal "
-                  "documents; use tight clause-oriented chunking.",
+                  "documents; clause-aware splitting at article boundaries.",
     ),
 
     # ──────────────────────────────────────────────────────────────────────
@@ -353,7 +353,7 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
                   "documents; embed as single chunk.",
     ),
     "legal_opinion": ChunkingStrategy(
-        strategy_name="legal_analysis",
+        strategy_name="clause_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=256,
@@ -364,7 +364,7 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
                   "with structured sections; use late chunking.",
     ),
     "auditor_report": ChunkingStrategy(
-        strategy_name="audit_document",
+        strategy_name="semantic",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=256,
@@ -427,7 +427,7 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
                   "embed as single chunk.",
     ),
     "insurance_policy": ChunkingStrategy(
-        strategy_name="insurance_document",
+        strategy_name="clause_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=128,
@@ -435,14 +435,14 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
         table_extraction="span",
         heading_aware=True,
         rationale="Insurance policies are clause-structured with "
-                  "schedules; use tight clause-oriented chunking.",
+                  "schedules; clause-aware splitting at section boundaries.",
     ),
 
     # ──────────────────────────────────────────────────────────────────────
     # TRADING AGREEMENTS — late_chunking (complex, clause-heavy)
     # ──────────────────────────────────────────────────────────────────────
     "isda_master_agreement": ChunkingStrategy(
-        strategy_name="trading_agreement",
+        strategy_name="clause_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=256,
@@ -451,10 +451,10 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
         heading_aware=True,
         rationale="ISDA Master Agreements are highly structured with "
                   "numbered sections, definitions, and schedules; "
-                  "smaller macro chunks preserve clause boundaries.",
+                  "clause-aware splitting preserves clause boundaries.",
     ),
     "isda_schedule": ChunkingStrategy(
-        strategy_name="trading_agreement",
+        strategy_name="clause_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=256,
@@ -465,7 +465,7 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
                   "clause-by-clause modifications.",
     ),
     "credit_support_annex": ChunkingStrategy(
-        strategy_name="trading_agreement",
+        strategy_name="clause_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=256,
@@ -476,7 +476,7 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
                   "with tables for thresholds and eligible collateral.",
     ),
     "gmra": ChunkingStrategy(
-        strategy_name="trading_agreement",
+        strategy_name="clause_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=256,
@@ -487,7 +487,7 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
                   "trading agreements with defined terms.",
     ),
     "gmsla": ChunkingStrategy(
-        strategy_name="trading_agreement",
+        strategy_name="clause_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=256,
@@ -498,7 +498,7 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
                   "structured clause patterns similar to GMRA.",
     ),
     "prime_brokerage_agreement": ChunkingStrategy(
-        strategy_name="trading_agreement",
+        strategy_name="clause_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=256,
@@ -509,7 +509,7 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
                   "docs with multiple service schedules.",
     ),
     "futures_agreement": ChunkingStrategy(
-        strategy_name="trading_agreement",
+        strategy_name="clause_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=256,
@@ -520,7 +520,7 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
                   "clause patterns with product schedules.",
     ),
     "trading_agreement": ChunkingStrategy(
-        strategy_name="trading_agreement",
+        strategy_name="clause_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=256,
@@ -535,7 +535,7 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
     # CREDIT & LENDING — late_chunking (long, clause-heavy)
     # ──────────────────────────────────────────────────────────────────────
     "credit_agreement": ChunkingStrategy(
-        strategy_name="credit_facility",
+        strategy_name="clause_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=256,
@@ -543,10 +543,11 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
         table_extraction="span",
         heading_aware=True,
         rationale="Credit agreements are long-form legal documents "
-                  "with covenants, conditions, and schedules.",
+                  "with covenants, conditions, and schedules; "
+                  "clause-aware splitting at Section/Article boundaries.",
     ),
     "facility_agreement": ChunkingStrategy(
-        strategy_name="credit_facility",
+        strategy_name="clause_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=256,
@@ -554,7 +555,7 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
         table_extraction="span",
         heading_aware=True,
         rationale="Facility agreements follow credit agreement "
-                  "structure with tranches and conditions.",
+                  "structure; clause-aware splitting.",
     ),
     "term_sheet": ChunkingStrategy(
         strategy_name="deal_summary",
@@ -579,17 +580,18 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
                   "lending commitment; embed as single chunk.",
     ),
     "loan_agreement": ChunkingStrategy(
-        strategy_name="contract_clause",
+        strategy_name="clause_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=128,
         child_target_tokens=192,
         table_extraction="none",
         heading_aware=True,
-        rationale="Loan agreements follow contract clause patterns.",
+        rationale="Loan agreements follow contract clause patterns; "
+                  "clause-aware splitting at section boundaries.",
     ),
     "security_agreement": ChunkingStrategy(
-        strategy_name="credit_facility",
+        strategy_name="clause_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=256,
@@ -597,10 +599,10 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
         table_extraction="span",
         heading_aware=True,
         rationale="Security agreements detail collateral pledged; "
-                  "clause-structured with schedules of assets.",
+                  "clause-aware splitting with schedules.",
     ),
     "guarantee": ChunkingStrategy(
-        strategy_name="credit_facility",
+        strategy_name="clause_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=128,
@@ -608,10 +610,10 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
         table_extraction="none",
         heading_aware=True,
         rationale="Guarantee agreements are clause-structured legal "
-                  "documents; moderate complexity.",
+                  "documents; clause-aware splitting.",
     ),
     "intercreditor_agreement": ChunkingStrategy(
-        strategy_name="credit_facility",
+        strategy_name="clause_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=256,
@@ -619,34 +621,34 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
         table_extraction="none",
         heading_aware=True,
         rationale="Intercreditor agreements govern creditor priorities; "
-                  "clause-heavy with waterfall provisions.",
+                  "clause-aware splitting for waterfall provisions.",
     ),
 
     # ──────────────────────────────────────────────────────────────────────
     # CAPITAL MARKETS — late_chunking (large, complex documents)
     # ──────────────────────────────────────────────────────────────────────
     "prospectus": ChunkingStrategy(
-        strategy_name="capital_markets",
+        strategy_name="topic_segmentation",
         processing_level="late_chunking",
         macro_max_tokens=8192,
         macro_overlap_tokens=512,
         child_target_tokens=384,
         table_extraction="span",
         heading_aware=True,
-        rationale="Prospectuses are 100+ page documents with risk "
-                  "factors, financials, and legal terms; larger overlap "
-                  "preserves cross-reference context.",
+        rationale="Prospectuses are 100+ page documents with distinct "
+                  "topic sections (risk factors, financials, legal); "
+                  "topic segmentation detects natural boundaries.",
     ),
     "offering_memorandum": ChunkingStrategy(
-        strategy_name="capital_markets",
+        strategy_name="topic_segmentation",
         processing_level="late_chunking",
         macro_max_tokens=8192,
         macro_overlap_tokens=512,
         child_target_tokens=384,
         table_extraction="span",
         heading_aware=True,
-        rationale="Offering memoranda follow prospectus structure "
-                  "with detailed financial and risk disclosures.",
+        rationale="Offering memoranda follow prospectus structure; "
+                  "topic segmentation for distinct disclosure sections.",
     ),
     "pricing_supplement": ChunkingStrategy(
         strategy_name="capital_markets",
@@ -660,7 +662,7 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
                   "with key terms and pricing details.",
     ),
     "base_indenture": ChunkingStrategy(
-        strategy_name="capital_markets",
+        strategy_name="clause_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=256,
@@ -668,10 +670,10 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
         table_extraction="none",
         heading_aware=True,
         rationale="Base indentures are long-form legal agreements "
-                  "governing bond terms; clause-structured.",
+                  "governing bond terms; clause-aware splitting.",
     ),
     "supplemental_indenture": ChunkingStrategy(
-        strategy_name="capital_markets",
+        strategy_name="clause_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=256,
@@ -679,14 +681,14 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
         table_extraction="none",
         heading_aware=True,
         rationale="Supplemental indentures amend base indentures; "
-                  "clause-structured legal documents.",
+                  "clause-aware splitting at article boundaries.",
     ),
 
     # ──────────────────────────────────────────────────────────────────────
     # FUND DOCUMENTS — varying complexity
     # ──────────────────────────────────────────────────────────────────────
     "fund_prospectus": ChunkingStrategy(
-        strategy_name="fund_document",
+        strategy_name="topic_segmentation",
         processing_level="late_chunking",
         macro_max_tokens=8192,
         macro_overlap_tokens=512,
@@ -694,21 +696,21 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
         table_extraction="span",
         heading_aware=True,
         rationale="Fund prospectuses are comprehensive disclosure "
-                  "documents; larger overlap for cross-references.",
+                  "documents; topic segmentation for distinct sections.",
     ),
     "private_placement_memorandum": ChunkingStrategy(
-        strategy_name="fund_document",
+        strategy_name="topic_segmentation",
         processing_level="late_chunking",
         macro_max_tokens=8192,
         macro_overlap_tokens=512,
         child_target_tokens=384,
         table_extraction="span",
         heading_aware=True,
-        rationale="PPMs are detailed offering documents for private "
-                  "funds; similar structure to prospectuses.",
+        rationale="PPMs are detailed offering documents; topic "
+                  "segmentation for distinct disclosure sections.",
     ),
     "subscription_agreement": ChunkingStrategy(
-        strategy_name="fund_document",
+        strategy_name="clause_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=128,
@@ -730,7 +732,7 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
                   "investor terms; page-level chunking sufficient.",
     ),
     "limited_partnership_agreement": ChunkingStrategy(
-        strategy_name="fund_document",
+        strategy_name="clause_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=256,
@@ -738,14 +740,14 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
         table_extraction="none",
         heading_aware=True,
         rationale="LPAs are long-form legal agreements governing "
-                  "fund operations; clause-structured.",
+                  "fund operations; clause-aware splitting.",
     ),
 
     # ──────────────────────────────────────────────────────────────────────
     # VALUATION & ANALYSIS — late_chunking
     # ──────────────────────────────────────────────────────────────────────
     "valuation_report": ChunkingStrategy(
-        strategy_name="analysis_document",
+        strategy_name="semantic",
         processing_level="late_chunking",
         macro_max_tokens=8192,
         macro_overlap_tokens=256,
@@ -756,7 +758,7 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
                   "financial tables; standard late chunking.",
     ),
     "appraisal": ChunkingStrategy(
-        strategy_name="analysis_document",
+        strategy_name="semantic",
         processing_level="late_chunking",
         macro_max_tokens=8192,
         macro_overlap_tokens=256,
@@ -767,7 +769,7 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
                   "tables and comparables.",
     ),
     "fairness_opinion": ChunkingStrategy(
-        strategy_name="analysis_document",
+        strategy_name="semantic",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=256,
@@ -778,7 +780,7 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
                   "documents with financial exhibits.",
     ),
     "research_report": ChunkingStrategy(
-        strategy_name="analysis_document",
+        strategy_name="semantic",
         processing_level="late_chunking",
         macro_max_tokens=8192,
         macro_overlap_tokens=256,
@@ -793,50 +795,52 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
     # SEC FILINGS — late_chunking (dense text, long sections)
     # ──────────────────────────────────────────────────────────────────────
     "10-K": ChunkingStrategy(
-        strategy_name="sec_filing",
+        strategy_name="parent_child",
         processing_level="late_chunking",
         macro_max_tokens=8192,
         macro_overlap_tokens=512,
         child_target_tokens=384,
         table_extraction="span",
         heading_aware=True,
-        rationale="SEC 10-K filings have long narrative sections with "
-                  "embedded tables; larger overlap preserves "
-                  "cross-reference context.",
+        rationale="SEC 10-K filings have long narrative sections; "
+                  "parent-child hierarchy enables both broad and "
+                  "precise retrieval across Items.",
     ),
     "10-Q": ChunkingStrategy(
-        strategy_name="sec_filing",
+        strategy_name="parent_child",
         processing_level="late_chunking",
         macro_max_tokens=8192,
         macro_overlap_tokens=512,
         child_target_tokens=384,
         table_extraction="span",
         heading_aware=True,
-        rationale="SEC 10-Q quarterly filings follow 10-K structure.",
+        rationale="SEC 10-Q quarterly filings follow 10-K structure; "
+                  "parent-child hierarchy for broad+precise retrieval.",
     ),
     "20-F": ChunkingStrategy(
-        strategy_name="sec_filing",
+        strategy_name="parent_child",
         processing_level="late_chunking",
         macro_max_tokens=8192,
         macro_overlap_tokens=512,
         child_target_tokens=384,
         table_extraction="span",
         heading_aware=True,
-        rationale="SEC 20-F foreign filings follow 10-K structure.",
+        rationale="SEC 20-F foreign filings follow 10-K structure; "
+                  "parent-child hierarchy.",
     ),
     "sec_filing": ChunkingStrategy(
-        strategy_name="sec_filing",
+        strategy_name="parent_child",
         processing_level="late_chunking",
         macro_max_tokens=8192,
         macro_overlap_tokens=512,
         child_target_tokens=384,
         table_extraction="span",
         heading_aware=True,
-        rationale="SEC filings benefit from larger overlap for "
-                  "cross-references.",
+        rationale="SEC filings benefit from parent-child hierarchy "
+                  "for multi-granularity retrieval.",
     ),
     "proxy_statement": ChunkingStrategy(
-        strategy_name="sec_filing",
+        strategy_name="parent_child",
         processing_level="late_chunking",
         macro_max_tokens=8192,
         macro_overlap_tokens=512,
@@ -844,7 +848,8 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
         table_extraction="span",
         heading_aware=True,
         rationale="Proxy statements (DEF 14A) are structured SEC "
-                  "filings with compensation tables and proposals.",
+                  "filings; parent-child for compensation tables "
+                  "and proposal sections.",
     ),
     "8-K": ChunkingStrategy(
         strategy_name="sec_filing",
@@ -862,134 +867,136 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
     # FINANCIAL REPORTS — late_chunking (balanced narrative & tables)
     # ──────────────────────────────────────────────────────────────────────
     "annual_report": ChunkingStrategy(
-        strategy_name="financial_report",
+        strategy_name="semantic",
         processing_level="late_chunking",
         macro_max_tokens=8192,
         macro_overlap_tokens=256,
         child_target_tokens=256,
         table_extraction="span",
         heading_aware=True,
-        rationale="Annual reports have balanced narrative/tabular "
-                  "content; standard parameters work well.",
+        rationale="Annual reports are narrative-heavy with thematic "
+                  "sections; semantic splitting at topic boundaries.",
     ),
     "financial_report": ChunkingStrategy(
-        strategy_name="financial_report",
+        strategy_name="semantic",
         processing_level="late_chunking",
         macro_max_tokens=8192,
         macro_overlap_tokens=256,
         child_target_tokens=256,
         table_extraction="span",
         heading_aware=True,
-        rationale="Financial reports: balanced narrative and tables.",
+        rationale="Financial reports: narrative-heavy; semantic "
+                  "splitting preserves thematic coherence.",
     ),
     "interim_report": ChunkingStrategy(
-        strategy_name="financial_report",
+        strategy_name="semantic",
         processing_level="late_chunking",
         macro_max_tokens=8192,
         macro_overlap_tokens=256,
         child_target_tokens=256,
         table_extraction="span",
         heading_aware=True,
-        rationale="Interim reports follow annual report structure "
-                  "but are shorter; same parameters apply.",
+        rationale="Interim reports follow annual report structure; "
+                  "semantic splitting for narrative sections.",
     ),
     "financial_statement": ChunkingStrategy(
-        strategy_name="financial_report",
+        strategy_name="table_aware",
         processing_level="late_chunking",
         macro_max_tokens=8192,
         macro_overlap_tokens=256,
         child_target_tokens=256,
         table_extraction="full_page",
         heading_aware=True,
-        rationale="Financial statements are table-heavy; full-page "
-                  "table extraction captures complete statements.",
+        rationale="Financial statements are table-heavy; table-aware "
+                  "chunking keeps financial tables as whole units.",
     ),
 
     # ──────────────────────────────────────────────────────────────────────
     # REGULATORY & BASEL — late_chunking (highly structured, table-heavy)
     # ──────────────────────────────────────────────────────────────────────
     "pillar3_disclosure": ChunkingStrategy(
-        strategy_name="regulatory_section",
+        strategy_name="table_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=256,
         child_target_tokens=192,
         table_extraction="full_page",
         heading_aware=True,
-        rationale="Pillar 3 disclosures are table-heavy with strict "
-                  "section structure; smaller macro chunks preserve "
-                  "table boundaries.",
+        rationale="Pillar 3 disclosures are table-heavy; table-aware "
+                  "chunking keeps regulatory tables as whole units.",
     ),
     "basel_regulatory": ChunkingStrategy(
-        strategy_name="regulatory_section",
+        strategy_name="table_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=256,
         child_target_tokens=192,
         table_extraction="full_page",
         heading_aware=True,
-        rationale="Basel regulatory docs are table-heavy with "
-                  "strict sections.",
+        rationale="Basel regulatory docs are table-heavy; table-aware "
+                  "chunking preserves table boundaries.",
     ),
     "regulatory_disclosure": ChunkingStrategy(
-        strategy_name="regulatory_section",
+        strategy_name="table_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=256,
         child_target_tokens=192,
         table_extraction="full_page",
         heading_aware=True,
-        rationale="Regulatory disclosures: structured sections "
-                  "and tables.",
+        rationale="Regulatory disclosures: table-aware chunking "
+                  "for structured tables and disclosures.",
     ),
     "regulatory_filing": ChunkingStrategy(
-        strategy_name="regulatory_section",
+        strategy_name="table_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=256,
         child_target_tokens=192,
         table_extraction="full_page",
         heading_aware=True,
-        rationale="Regulatory filings follow structured formats "
-                  "with mandatory tables and disclosures.",
+        rationale="Regulatory filings: table-aware chunking for "
+                  "mandatory tables and structured disclosures.",
     ),
 
     # ──────────────────────────────────────────────────────────────────────
     # LEGAL DOCUMENTS — late_chunking (clause-oriented)
     # ──────────────────────────────────────────────────────────────────────
     "contract": ChunkingStrategy(
-        strategy_name="contract_clause",
+        strategy_name="clause_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=128,
         child_target_tokens=192,
         table_extraction="none",
         heading_aware=True,
-        rationale="Contracts are clause-structured; smaller chunks "
-                  "keep clauses intact.",
+        rationale="Contracts are clause-structured; clause-aware "
+                  "splitting at Section/Article boundaries.",
     ),
     "legal_document": ChunkingStrategy(
-        strategy_name="contract_clause",
+        strategy_name="clause_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=128,
         child_target_tokens=192,
         table_extraction="none",
         heading_aware=True,
-        rationale="Legal documents: clause-oriented structure.",
+        rationale="Legal documents: clause-aware splitting at "
+                  "clause/section boundaries.",
     ),
     "indenture": ChunkingStrategy(
-        strategy_name="contract_clause",
+        strategy_name="clause_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=128,
         child_target_tokens=192,
         table_extraction="none",
         heading_aware=True,
-        rationale="Indentures follow contract clause structure.",
+        rationale="Indentures: clause-aware splitting at article "
+                  "and section boundaries.",
     ),
     "nda": ChunkingStrategy(
-        strategy_name="contract_clause",
+        strategy_name="clause_aware",
         processing_level="single_chunk",
         macro_max_tokens=8192,
         macro_overlap_tokens=0,
@@ -1000,7 +1007,7 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
                   "chunk to preserve full context.",
     ),
     "engagement_letter": ChunkingStrategy(
-        strategy_name="contract_clause",
+        strategy_name="clause_aware",
         processing_level="single_chunk",
         macro_max_tokens=8192,
         macro_overlap_tokens=0,
@@ -1026,26 +1033,26 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
     # ESG / SUSTAINABILITY — late_chunking (narrative-heavy)
     # ──────────────────────────────────────────────────────────────────────
     "esg_report": ChunkingStrategy(
-        strategy_name="sustainability_report",
+        strategy_name="semantic",
         processing_level="late_chunking",
         macro_max_tokens=8192,
         macro_overlap_tokens=256,
         child_target_tokens=320,
         table_extraction="span",
         heading_aware=True,
-        rationale="ESG reports have long narrative sections with "
-                  "embedded metrics; larger child targets keep "
-                  "metric context together.",
+        rationale="ESG reports are narrative-heavy; semantic splitting "
+                  "detects thematic boundaries between ESG pillars.",
     ),
     "sustainability": ChunkingStrategy(
-        strategy_name="sustainability_report",
+        strategy_name="semantic",
         processing_level="late_chunking",
         macro_max_tokens=8192,
         macro_overlap_tokens=256,
         child_target_tokens=320,
         table_extraction="span",
         heading_aware=True,
-        rationale="Sustainability reports: narrative-heavy with metrics.",
+        rationale="Sustainability reports: narrative-heavy; semantic "
+                  "splitting at thematic boundaries.",
     ),
 
     # ──────────────────────────────────────────────────────────────────────
@@ -1082,7 +1089,7 @@ _STRATEGY_RULES: Dict[str, ChunkingStrategy] = {
         rationale="Consent letters are short documents; single chunk.",
     ),
     "amendment": ChunkingStrategy(
-        strategy_name="contract_clause",
+        strategy_name="clause_aware",
         processing_level="late_chunking",
         macro_max_tokens=4096,
         macro_overlap_tokens=128,

@@ -187,7 +187,7 @@ class TestTradingAgreements:
         inp = _make_input(document_type=doc_type, page_count=50)
         result = agent.determine_strategy(inp)
         assert result.chunking_strategy.processing_level == "late_chunking"
-        assert result.chunking_strategy.strategy_name == "trading_agreement"
+        assert result.chunking_strategy.strategy_name == "clause_aware"
         assert result.chunking_strategy.macro_max_tokens == 4096
         assert result.decision_method == "deterministic"
 
@@ -252,14 +252,14 @@ class TestExistingDocumentTypes:
     """Ensure backward compatibility with previously supported types."""
 
     @pytest.mark.parametrize("doc_type,expected_strategy", [
-        ("10-K", "sec_filing"),
-        ("10-Q", "sec_filing"),
-        ("20-F", "sec_filing"),
-        ("annual_report", "financial_report"),
-        ("pillar3_disclosure", "regulatory_section"),
-        ("contract", "contract_clause"),
-        ("loan_agreement", "contract_clause"),
-        ("esg_report", "sustainability_report"),
+        ("10-K", "parent_child"),
+        ("10-Q", "parent_child"),
+        ("20-F", "parent_child"),
+        ("annual_report", "semantic"),
+        ("pillar3_disclosure", "table_aware"),
+        ("contract", "clause_aware"),
+        ("loan_agreement", "clause_aware"),
+        ("esg_report", "semantic"),
     ])
     def test_known_document_types(self, agent, doc_type, expected_strategy):
         inp = _make_input(document_type=doc_type)
@@ -271,11 +271,11 @@ class TestExistingDocumentTypes:
         assert result.confidence == 0.95
 
     @pytest.mark.parametrize("label,expected_strategy", [
-        ("sec_filing", "sec_filing"),
-        ("financial_report", "financial_report"),
-        ("basel_regulatory", "regulatory_section"),
-        ("legal_document", "contract_clause"),
-        ("sustainability", "sustainability_report"),
+        ("sec_filing", "parent_child"),
+        ("financial_report", "semantic"),
+        ("basel_regulatory", "table_aware"),
+        ("legal_document", "clause_aware"),
+        ("sustainability", "semantic"),
     ])
     def test_classification_label_fallback(self, agent, label, expected_strategy):
         inp = _make_input(classification_label=label)
@@ -289,8 +289,8 @@ class TestExistingDocumentTypes:
             classification_label="financial_report",
         )
         result = agent.determine_strategy(inp)
-        # 10-K maps to sec_filing, not financial_report
-        assert result.chunking_strategy.strategy_name == "sec_filing"
+        # 10-K maps to parent_child, not semantic
+        assert result.chunking_strategy.strategy_name == "parent_child"
 
     def test_sec_filing_has_larger_overlap(self, agent):
         inp = _make_input(document_type="10-K")
@@ -624,7 +624,7 @@ class TestMessageBusIntegration:
         result = agent.handle_message(msg)
         assert isinstance(result, PreprocessorResult)
         assert result.requires_chunking is True
-        assert result.chunking_strategy.strategy_name == "financial_report"
+        assert result.chunking_strategy.strategy_name == "semantic"
         assert result.chunking_strategy.processing_level == "late_chunking"
 
     def test_handle_message_identity_doc(self, agent):
