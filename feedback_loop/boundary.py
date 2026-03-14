@@ -9,6 +9,13 @@ Default rules:
 4. No global reusable raw cross-client document text
 5. Only approved sanitized feature sharing is allowed
 6. Optional hierarchical sharing: θ_B = θ_shared + δ_B
+
+Boundary validation is two-tiered:
+- **Ingestion-time validation:** Accepts events with partial boundary keys
+  (empty division/jurisdiction). Logs warnings but stores the event.
+- **Trainable-row validation:** Requires either full granularity OR an
+  explicit ``reduced_granularity_approved`` flag on the BoundaryKey.
+  Training rows with empty division/jurisdiction and no approval are REJECTED.
 """
 
 from __future__ import annotations
@@ -17,7 +24,7 @@ import logging
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from feedback_loop.interfaces import BoundaryPolicyGuard
-from feedback_loop.models import BoundaryKey
+from feedback_loop.models import BoundaryGranularity, BoundaryKey
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +70,15 @@ class DefaultBoundaryPolicyGuard(BoundaryPolicyGuard):
 
     Maintains a registry of approved sharing pairs.
     By default, no cross-boundary sharing is allowed.
+
+    Boundary validation distinguishes two contexts:
+
+    **Ingestion-time** (``validate_event_boundary``):
+        Accepts partial boundary keys. Events are stored with warnings.
+
+    **Training-time** (``validate_row``):
+        Requires full granularity OR ``reduced_granularity_approved=True``.
+        Rows lacking both are rejected to prevent silent data contamination.
     """
 
     def __init__(self) -> None:
@@ -87,17 +103,43 @@ class DefaultBoundaryPolicyGuard(BoundaryPolicyGuard):
         """Enable same-client sharing across divisions/jurisdictions."""
         self._client_sharing_enabled.add(client)
 
+    # ── Ingestion-time validation ────────────────────────────────────
+
+    def validate_event_boundary(self, boundary: BoundaryKey) -> List[str]:
+        """Validate a boundary key at ingestion time (permissive).
+
+        Returns a list of warning strings (empty = clean).
+        Events are always stored, but warnings are logged.
+        """
+        warnings: List[str] = []
+        if not boundary.client:
+            warnings.append("BoundaryKey has empty client — event has no tenant isolation")
+        if not boundary.division:
+            warnings.append(
+                f"BoundaryKey has empty division for client={boundary.client}"
+            )
+        if not boundary.jurisdiction:
+            warnings.append(
+                f"BoundaryKey has empty jurisdiction for client={boundary.client}"
+            )
+        for w in warnings:
+            logger.warning("Ingestion boundary warning: %s", w)
+        return warnings
+
+    # ── Training-time validation ─────────────────────────────────────
+
     def validate_row(self, row: Any, expected_boundary: BoundaryKey) -> bool:
-        """Check if a training row is boundary-safe.
+        """Check if a training row is boundary-safe (strict).
 
         A row is valid if:
-        1. It has a boundary_key attribute
-        2. The boundary_key is a BoundaryKey with non-empty client
-        3. The boundary_key matches the expected boundary
+        1. It has a boundary_key attribute that is a BoundaryKey
+        2. The client is non-empty
+        3. Either full granularity OR reduced_granularity_approved=True
+        4. The boundary_key matches the expected boundary
 
-        Rejects rows with empty client (hard constraint). Warns on empty
-        division/jurisdiction but allows them — reduced-granularity isolation
-        is acceptable when explicitly configured, but must never be silent.
+        This is the **training-time** gate. Rows that fail here are
+        silently dropped from the training dataset. They are not deleted —
+        the feedback event that produced them is still auditable.
         """
         if not hasattr(row, "boundary_key"):
             logger.warning("Training row missing boundary_key: %s", type(row).__name__)
@@ -116,16 +158,22 @@ class DefaultBoundaryPolicyGuard(BoundaryPolicyGuard):
             )
             return False
 
-        # Warn on partial boundary keys — isolation may be weaker than intended
-        if not row_boundary.division:
-            logger.warning(
-                "BoundaryKey has empty division for client=%s — training isolation is client-level only",
-                row_boundary.client,
-            )
-        if not row_boundary.jurisdiction:
-            logger.warning(
-                "BoundaryKey has empty jurisdiction for client=%s — no jurisdictional isolation",
-                row_boundary.client,
+        # Strict granularity enforcement for trainable rows
+        if not row_boundary.is_full_granularity:
+            if not row_boundary.reduced_granularity_approved:
+                logger.warning(
+                    "Training row REJECTED: boundary %s has %s granularity "
+                    "without reduced_granularity_approved=True. "
+                    "Set reduced_granularity_approved on the BoundaryKey or "
+                    "provide full (client, division, jurisdiction).",
+                    row_boundary.key, row_boundary.granularity.value,
+                )
+                return False
+            # Approved reduced granularity — log but allow
+            logger.info(
+                "Training row accepted at %s granularity (policy-approved) "
+                "for client=%s",
+                row_boundary.granularity.value, row_boundary.client,
             )
 
         if row_boundary.key != expected_boundary.key:

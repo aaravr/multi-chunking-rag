@@ -13,6 +13,7 @@ import pytest
 from datetime import datetime, timezone
 
 from feedback_loop.models import (
+    BoundaryGranularity,
     BoundaryKey,
     CalibrationTrainingRow,
     ChunkingDecision,
@@ -805,7 +806,7 @@ class TestEndToEndPipeline:
 
     def test_full_pipeline_correction(self, trace, boundary):
         """Realistic e2e: user corrects document type + field value on high-confidence result."""
-        pipeline = FeedbackLoopPipeline()
+        pipeline = FeedbackLoopPipeline.create_test()
 
         # Extend trace with a chunk containing the correct value so Rule 3 fires
         trace_ext = trace.model_copy(update={
@@ -866,7 +867,7 @@ class TestEndToEndPipeline:
 
     def test_pipeline_positive_feedback(self, trace, boundary):
         """Positive feedback produces no training rows (nothing to correct)."""
-        pipeline = FeedbackLoopPipeline()
+        pipeline = FeedbackLoopPipeline.create_test()
         pipeline.trace_join.store_trace(trace)
 
         event = FeedbackEvent(
@@ -881,7 +882,7 @@ class TestEndToEndPipeline:
 
     def test_pipeline_unresolved_reference(self, boundary):
         """Unresolved 'same as above' triggers extraction + calibration."""
-        pipeline = FeedbackLoopPipeline()
+        pipeline = FeedbackLoopPipeline.create_test()
 
         trace = PredictionTrace(
             trace_id="trace-unresolved",
@@ -908,7 +909,7 @@ class TestEndToEndPipeline:
 
     def test_pipeline_no_trace_quarantine(self, boundary):
         """If no trace found, pipeline quarantines feedback as non-trainable."""
-        pipeline = FeedbackLoopPipeline()
+        pipeline = FeedbackLoopPipeline.create_test()
         event = FeedbackEvent(
             trace_id="nonexistent",
             boundary_key=boundary,
@@ -925,7 +926,7 @@ class TestEndToEndPipeline:
 
     def test_pipeline_retraining_trigger(self, trace, boundary):
         """After enough feedback, retraining can be triggered."""
-        pipeline = FeedbackLoopPipeline()
+        pipeline = FeedbackLoopPipeline.create_test()
         pipeline.trace_join.store_trace(trace)
 
         # Submit 12 correction events
@@ -977,6 +978,79 @@ class TestBoundaryKey:
         b2 = BoundaryKey(client="acme", division="retail")
         assert b1.shares_client(b2)
         assert not b1.is_same_boundary(b2)
+
+    def test_granularity_full(self):
+        b = BoundaryKey(client="acme", division="ib", jurisdiction="US")
+        assert b.is_full_granularity
+        assert b.granularity.value == "full"
+
+    def test_granularity_client_only(self):
+        b = BoundaryKey(client="acme")
+        assert not b.is_full_granularity
+        assert b.granularity.value == "client_only"
+
+    def test_granularity_client_division(self):
+        b = BoundaryKey(client="acme", division="ib")
+        assert not b.is_full_granularity
+        assert b.granularity.value == "client_division"
+
+    def test_reduced_granularity_default_false(self):
+        b = BoundaryKey(client="acme")
+        assert b.reduced_granularity_approved is False
+
+
+class TestPipelineConstruction:
+    def test_bare_constructor_raises(self):
+        """Bare FeedbackLoopPipeline() must raise TypeError."""
+        with pytest.raises(TypeError, match="requires explicit service wiring"):
+            FeedbackLoopPipeline()
+
+    def test_create_test_succeeds(self):
+        """create_test() produces a functional pipeline."""
+        pipeline = FeedbackLoopPipeline.create_test()
+        assert pipeline.ingestion is not None
+        assert pipeline.trace_join is not None
+        assert pipeline.orchestrator is not None
+
+
+class TestBoundaryStrictValidation:
+    """Training-time boundary enforcement: partial boundary requires policy approval."""
+
+    def test_partial_boundary_rejected_without_approval(self, guard):
+        """Rows with partial boundary and no approval are rejected."""
+        partial = BoundaryKey(client="acme")  # no division/jurisdiction
+        row = PlannerTrainingRow(
+            source_feedback_ids=["f1"],
+            boundary_key=partial,
+        )
+        assert guard.validate_row(row, partial) is False
+
+    def test_partial_boundary_accepted_with_approval(self, guard):
+        """Rows with partial boundary and reduced_granularity_approved=True are accepted."""
+        partial = BoundaryKey(client="acme", reduced_granularity_approved=True)
+        row = PlannerTrainingRow(
+            source_feedback_ids=["f1"],
+            boundary_key=partial,
+        )
+        assert guard.validate_row(row, partial) is True
+
+    def test_full_boundary_accepted_always(self, guard, boundary):
+        """Rows with full boundary are always accepted."""
+        row = PlannerTrainingRow(
+            source_feedback_ids=["f1"],
+            boundary_key=boundary,
+        )
+        assert guard.validate_row(row, boundary) is True
+
+    def test_empty_client_always_rejected(self, guard):
+        """Rows with empty client are always rejected."""
+        # Can't create BoundaryKey with empty client due to min_length=1,
+        # so we test with a mock-like object
+        class FakeBoundary:
+            client = ""
+        class FakeRow:
+            boundary_key = FakeBoundary()
+        assert guard.validate_row(FakeRow(), BoundaryKey(client="x")) is False
 
 
 # ── Model Evaluator Tests ────────────────────────────────────────────

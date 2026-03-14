@@ -7,6 +7,11 @@
     and evaluation-gated promotion. See ``docs/ENGINEERING_REVIEW.md``
     Section 4 for migration guidance.
 
+    **Expected removal: Phase 8** (Multi-Document & Security).
+
+    No new code should import this module. If you need retraining functionality,
+    use ``FeedbackLoopPipeline.create_production()`` or ``create_test()``.
+
 Responsibilities (legacy):
 - Evaluate accumulated feedback to decide if retraining is warranted
 - Retrain classifier's SGDClassifier from embeddings + labels

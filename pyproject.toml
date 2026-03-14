@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68.0", "wheel"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "multi-chunking-rag"
@@ -61,8 +61,23 @@ dev = [
     "pytest",
     "pytest-cov",
 ]
+# Flattened union of all optional groups (no self-reference)
 all = [
-    "multi-chunking-rag[azure,multi-format,docling,feedback-api,kafka,observability,graph,dev]",
+    "azure-ai-documentintelligence",
+    "python-docx",
+    "openpyxl",
+    "beautifulsoup4",
+    "docling",
+    "fastapi",
+    "uvicorn",
+    "kafka-python",
+    "redis",
+    "opentelemetry-api",
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-otlp-proto-grpc",
+    "neo4j>=5.0.0",
+    "pytest",
+    "pytest-cov",
 ]
 
 [tool.setuptools.packages.find]
@@ -86,13 +101,15 @@ markers = [
     "integration: Integration tests requiring PostgreSQL (TEST_DATABASE_URL)",
     "external: Tests requiring external services (Azure DI, OpenAI API, Kafka)",
     "slow: Tests that take >5 seconds to run",
+    "legacy: Tests for deprecated modules retained for backward compatibility",
 ]
 # Default: run only unit tests unless explicitly requested
 # Usage:
-#   pytest tests/ -v                       # all tests
-#   pytest tests/ -v -m unit               # unit tests only
-#   pytest tests/ -v -m integration        # integration tests only
+#   pytest tests/ -v -m unit               # unit tests only (CI default)
+#   pytest tests/ -v -m integration        # DB tests only
 #   pytest tests/ -v -m "not external"     # skip external-dependency tests
+#   pytest tests/ -v -m legacy             # deprecated module tests only
+#   pytest tests/ -v                       # all tests
 filterwarnings = [
     "ignore::DeprecationWarning:agents.feedback_agent",
     "ignore::DeprecationWarning:agents.retraining_agent",

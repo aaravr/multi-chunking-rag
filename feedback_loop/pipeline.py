@@ -4,12 +4,25 @@ Ties all services together into the complete feedback-to-retraining pipeline:
     Ingest → Join → Normalize → Attribute → Build → Guard → Submit
 
 This is the main entry point for processing feedback events.
+
+**Construction rules:**
+
+    # Production — requires explicit DB connection factory
+    pipeline = FeedbackLoopPipeline.create_production(get_conn)
+
+    # Tests / local dev — explicit in-memory wiring
+    pipeline = FeedbackLoopPipeline.create_test()
+
+    # Custom wiring — all services must be explicitly provided
+    pipeline = FeedbackLoopPipeline(ingestion=..., trace_join=..., ...)
+
+Direct ``FeedbackLoopPipeline()`` with no arguments raises ``TypeError``
+to prevent silent fallback to in-memory services in production.
 """
 
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
@@ -44,6 +57,9 @@ from feedback_loop.training_rows import DefaultTrainingRowBuilder
 
 logger = logging.getLogger(__name__)
 
+# Sentinel to distinguish "not provided" from "explicitly passed None"
+_UNSET = object()
+
 
 @dataclass
 class PipelineResult:
@@ -73,26 +89,48 @@ class FeedbackLoopPipeline:
     If no prediction trace is found, the feedback is stored but quarantined
     as non-trainable. Quarantined events are preserved for audit and manual
     remediation but do not generate training rows.
+
+    **Do not call the constructor directly with no arguments.** Use one of
+    the factory methods (``create_production``, ``create_test``) or provide
+    all services explicitly.
     """
 
     def __init__(
         self,
-        ingestion: Optional[FeedbackIngestionService] = None,
-        trace_join: Optional[TraceJoinService] = None,
+        ingestion: Any = _UNSET,
+        trace_join: Any = _UNSET,
         normalizer: Optional[FeedbackNormalizer] = None,
         attribution: Optional[AttributionEngine] = None,
         row_builder: Optional[TrainingRowBuilder] = None,
         boundary_guard: Optional[BoundaryPolicyGuard] = None,
-        orchestrator: Optional[RetrainingOrchestrator] = None,
+        orchestrator: Any = _UNSET,
     ) -> None:
-        self.ingestion = ingestion or InMemoryFeedbackIngestionService()
-        self.trace_join = trace_join or InMemoryTraceJoinService()
+        # Require at least ingestion, trace_join, or orchestrator to be
+        # explicitly provided.  If all three are _UNSET the caller used
+        # bare FeedbackLoopPipeline() which silently defaults to in-memory.
+        if ingestion is _UNSET and trace_join is _UNSET and orchestrator is _UNSET:
+            raise TypeError(
+                "FeedbackLoopPipeline() requires explicit service wiring. "
+                "Use FeedbackLoopPipeline.create_test() for in-memory services, "
+                "FeedbackLoopPipeline.create_production(get_conn) for DB-backed, "
+                "or provide services explicitly via constructor arguments."
+            )
+
+        self.ingestion: FeedbackIngestionService = (
+            ingestion if ingestion is not _UNSET and ingestion is not None
+            else InMemoryFeedbackIngestionService()
+        )
+        self.trace_join: TraceJoinService = (
+            trace_join if trace_join is not _UNSET and trace_join is not None
+            else InMemoryTraceJoinService()
+        )
         self.normalizer = normalizer or DefaultFeedbackNormalizer()
         self.attribution = attribution or RuleBasedAttributionEngine()
         self.row_builder = row_builder or DefaultTrainingRowBuilder()
         self.boundary_guard = boundary_guard or DefaultBoundaryPolicyGuard()
-        self.orchestrator = orchestrator or InMemoryRetrainingOrchestrator(
-            boundary_guard=self.boundary_guard,
+        self.orchestrator: RetrainingOrchestrator = (
+            orchestrator if orchestrator is not _UNSET and orchestrator is not None
+            else InMemoryRetrainingOrchestrator(boundary_guard=self.boundary_guard)
         )
 
     def process(self, event: FeedbackEvent) -> PipelineResult:
@@ -193,4 +231,13 @@ class FeedbackLoopPipeline:
         Explicitly wires in-memory implementations. Use this for unit tests
         and local development where no database is available.
         """
-        return cls()
+        guard = DefaultBoundaryPolicyGuard()
+        return cls(
+            ingestion=InMemoryFeedbackIngestionService(),
+            trace_join=InMemoryTraceJoinService(),
+            normalizer=DefaultFeedbackNormalizer(),
+            attribution=RuleBasedAttributionEngine(),
+            row_builder=DefaultTrainingRowBuilder(),
+            boundary_guard=guard,
+            orchestrator=InMemoryRetrainingOrchestrator(boundary_guard=guard),
+        )

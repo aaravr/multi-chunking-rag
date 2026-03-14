@@ -6,12 +6,17 @@
     layer-specific training row generation, and model lifecycle management.
     See ``docs/ENGINEERING_REVIEW.md`` Section 4 for migration guidance.
 
+    **Expected removal: Phase 8** (Multi-Document & Security).
+
     The canonical feedback/retraining architecture is:
         feedback_loop/pipeline.py  — end-to-end orchestration
         feedback_loop/models.py    — typed domain models
         feedback_loop/attribution.py — 6-rule attribution engine
         feedback_loop/training_rows.py — layer-specific row builders
         feedback_loop/boundary.py  — boundary-safe isolation
+
+    No new code should import this module. If you need feedback functionality,
+    use ``FeedbackLoopPipeline.create_production()`` or ``create_test()``.
 
 Responsibilities (legacy):
 - Receive user feedback (positive/negative/correction) on query answers

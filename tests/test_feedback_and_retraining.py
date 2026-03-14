@@ -1,4 +1,14 @@
-"""Tests for FeedbackAgent and RetrainingAgent (§4.10, §4.11)."""
+"""Tests for FeedbackAgent and RetrainingAgent (§4.10, §4.11).
+
+.. deprecated::
+    These tests exercise the **deprecated** feedback/retraining agents.
+    The canonical path is ``feedback_loop/`` (tested by ``test_feedback_loop.py``).
+    These tests are retained for backward compatibility and are automatically
+    tagged with the ``legacy`` pytest marker.
+
+    Expected removal: Phase 8 (Multi-Document & Security), when the old
+    migration 007 tables and agent modules are retired.
+"""
 
 import time
 import pytest

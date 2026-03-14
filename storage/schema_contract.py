@@ -1,3 +1,15 @@
+"""Database schema contract validator.
+
+Enforces operational invariants beyond basic column presence:
+1. Required columns exist in every validated table
+2. Required unique constraints exist (deduplication, idempotency)
+3. Required foreign keys exist (referential integrity)
+4. Required indexes exist (query performance for runtime tables)
+
+This is a **runtime safety net**, not a migration tool. If validation
+fails, the remediation is to run ``python storage/setup_db.py``.
+"""
+
 from typing import Dict, List
 
 from storage.db import get_connection
@@ -82,6 +94,7 @@ REQUIRED_SCHEMA: Dict[str, List[str]] = {
     ],
     "feedback_events": [
         "feedback_id",
+        "trace_id",
         "boundary_client",
         "boundary_division",
         "boundary_jurisdiction",
@@ -107,6 +120,39 @@ REQUIRED_SCHEMA: Dict[str, List[str]] = {
         "boundary_client",
         "stage",
     ],
+    # ── Training Row Tables (migration 009) ──────────────────────────
+    "training_rows_planner": [
+        "row_id",
+        "source_feedback_ids",
+        "boundary_client",
+        "accuracy",
+    ],
+    "training_rows_classifier": [
+        "row_id",
+        "source_feedback_ids",
+        "boundary_client",
+        "is_correct",
+    ],
+    "training_rows_chunking": [
+        "row_id",
+        "source_feedback_ids",
+        "boundary_client",
+        "evidence_recall",
+    ],
+    "training_rows_extraction": [
+        "row_id",
+        "source_feedback_ids",
+        "boundary_client",
+        "field_name",
+        "is_correct",
+    ],
+    "training_rows_calibration": [
+        "row_id",
+        "source_feedback_ids",
+        "boundary_client",
+        "is_correct",
+        "confidence_bucket",
+    ],
 }
 
 
@@ -117,10 +163,64 @@ REQUIRED_UNIQUE_CONSTRAINTS: Dict[str, List[frozenset]] = {
     "chunks": [frozenset({"doc_id", "macro_id", "child_id"})],
 }
 
-# Required indexes (table → list of column-sets).
+# Required foreign keys (child_table → list of (child_cols, parent_table, parent_cols)).
+REQUIRED_FOREIGN_KEYS: Dict[str, List[tuple]] = {
+    "feedback_events": [
+        (("trace_id",), "prediction_traces", ("trace_id",)),
+    ],
+    "feedback_attributions": [
+        (("feedback_id",), "feedback_events", ("feedback_id",)),
+    ],
+    "retraining_jobs": [
+        (("candidate_id",), "model_candidates", ("candidate_id",)),
+    ],
+    "evaluation_reports": [
+        (("candidate_id",), "model_candidates", ("candidate_id",)),
+    ],
+}
+
+# Required indexes (table → list of column-sets that must appear in at least one index).
 REQUIRED_INDEXES: Dict[str, List[frozenset]] = {
-    "prediction_traces": [frozenset({"query_id"})],
-    "feedback_events": [frozenset({"boundary_client"})],
+    # Core runtime tables
+    "prediction_traces": [
+        frozenset({"query_id"}),
+        frozenset({"boundary_client"}),
+    ],
+    "feedback_events": [
+        frozenset({"boundary_client"}),
+        frozenset({"trace_id"}),
+        frozenset({"rating"}),
+    ],
+    "feedback_attributions": [
+        frozenset({"feedback_id"}),
+    ],
+    # Training row tables — boundary index for isolation queries
+    "training_rows_planner": [
+        frozenset({"boundary_client"}),
+    ],
+    "training_rows_classifier": [
+        frozenset({"boundary_client"}),
+    ],
+    "training_rows_chunking": [
+        frozenset({"boundary_client"}),
+    ],
+    "training_rows_extraction": [
+        frozenset({"boundary_client"}),
+        frozenset({"field_name"}),
+    ],
+    "training_rows_calibration": [
+        frozenset({"boundary_client"}),
+        frozenset({"confidence_bucket"}),
+    ],
+    # Model lifecycle tables
+    "model_candidates": [
+        frozenset({"layer"}),
+        frozenset({"stage"}),
+    ],
+    "retraining_jobs": [
+        frozenset({"layer"}),
+        frozenset({"status"}),
+    ],
 }
 
 
@@ -130,7 +230,8 @@ def check_schema_contract() -> None:
     Checks:
     1. All required columns exist in each table
     2. Required unique constraints exist
-    3. Required indexes exist
+    3. Required foreign keys exist
+    4. Required indexes exist
     """
     errors: List[str] = []
     with get_connection() as conn:
@@ -147,6 +248,9 @@ def check_schema_contract() -> None:
                     (table,),
                 )
                 existing = {row[0] for row in cursor.fetchall()}
+                if not existing:
+                    errors.append(f"Table {table} does not exist")
+                    continue
                 missing_cols = [col for col in columns if col not in existing]
                 if missing_cols:
                     errors.append(
@@ -181,7 +285,43 @@ def check_schema_contract() -> None:
                             f"({', '.join(sorted(required_cols))})"
                         )
 
-            # 3. Indexes
+            # 3. Foreign keys
+            for child_table, fk_defs in REQUIRED_FOREIGN_KEYS.items():
+                cursor.execute(
+                    """
+                    SELECT
+                        kcu.column_name,
+                        ccu.table_name AS parent_table,
+                        ccu.column_name AS parent_column
+                    FROM information_schema.table_constraints tc
+                    JOIN information_schema.key_column_usage kcu
+                        ON tc.constraint_name = kcu.constraint_name
+                        AND tc.table_schema = kcu.table_schema
+                    JOIN information_schema.constraint_column_usage ccu
+                        ON tc.constraint_name = ccu.constraint_name
+                        AND tc.table_schema = ccu.table_schema
+                    WHERE tc.table_schema = 'public'
+                      AND tc.table_name = %s
+                      AND tc.constraint_type = 'FOREIGN KEY'
+                    """,
+                    (child_table,),
+                )
+                existing_fks = [
+                    (row[0], row[1], row[2]) for row in cursor.fetchall()
+                ]
+                for child_cols, parent_table, parent_cols in fk_defs:
+                    found = any(
+                        fk[0] in child_cols and fk[1] == parent_table and fk[2] in parent_cols
+                        for fk in existing_fks
+                    )
+                    if not found:
+                        errors.append(
+                            f"Missing FK on {child_table}"
+                            f"({', '.join(child_cols)}) -> "
+                            f"{parent_table}({', '.join(parent_cols)})"
+                        )
+
+            # 4. Indexes
             for table, index_sets in REQUIRED_INDEXES.items():
                 cursor.execute(
                     """

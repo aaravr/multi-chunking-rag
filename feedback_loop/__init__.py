@@ -38,6 +38,7 @@ Hard constraints:
 """
 
 from feedback_loop.models import (
+    BoundaryGranularity,
     BoundaryKey,
     PredictionTrace,
     FeedbackEvent,
@@ -63,6 +64,7 @@ from feedback_loop.services import (
 
 __all__ = [
     # Domain models
+    "BoundaryGranularity",
     "BoundaryKey",
     "PredictionTrace",
     "FeedbackEvent",

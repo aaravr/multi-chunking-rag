@@ -90,19 +90,39 @@ class RetrainingTrigger(str, Enum):
 # ── Boundary Key ─────────────────────────────────────────────────────
 
 
+class BoundaryGranularity(str, Enum):
+    """Granularity level for boundary-safe training isolation."""
+    FULL = "full"                        # client + division + jurisdiction
+    CLIENT_DIVISION = "client_division"  # client + division only
+    CLIENT_ONLY = "client_only"          # client-level isolation only
+
+
 class BoundaryKey(BaseModel):
     """Training isolation boundary: B = (client, division, jurisdiction).
 
     Every feedback event and training row must carry or derive a boundary_key.
     No cross-boundary training data mixing by default.
 
-    The client field is required and must be non-empty. Empty division or
-    jurisdiction fields are allowed but will generate a validation warning
-    in boundary policy enforcement.
+    The client field is required and must be non-empty.
+
+    For training rows, empty division or jurisdiction requires an explicit
+    ``reduced_granularity_approved`` flag to indicate that a human or policy
+    engine has approved the reduced isolation level.  Without this flag,
+    the boundary guard will reject trainable rows that lack full granularity.
+
+    For ingestion (feedback events, prediction traces), reduced granularity
+    is tolerated with a warning — the event is stored but flagged.
     """
     client: str = Field(..., min_length=1, description="Client identifier (required, non-empty)")
     division: str = ""
     jurisdiction: str = ""
+    reduced_granularity_approved: bool = Field(
+        default=False,
+        description=(
+            "True if a policy engine or admin has explicitly approved "
+            "training at reduced granularity (missing division/jurisdiction)."
+        ),
+    )
 
     @property
     def key(self) -> str:
@@ -113,6 +133,19 @@ class BoundaryKey(BaseModel):
         if self.jurisdiction:
             parts.append(self.jurisdiction)
         return "|".join(parts)
+
+    @property
+    def granularity(self) -> BoundaryGranularity:
+        """Determine the actual isolation granularity."""
+        if self.division and self.jurisdiction:
+            return BoundaryGranularity.FULL
+        if self.division:
+            return BoundaryGranularity.CLIENT_DIVISION
+        return BoundaryGranularity.CLIENT_ONLY
+
+    @property
+    def is_full_granularity(self) -> bool:
+        return self.granularity == BoundaryGranularity.FULL
 
     def is_same_boundary(self, other: BoundaryKey) -> bool:
         return self.key == other.key
