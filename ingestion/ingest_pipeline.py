@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import time
 import uuid
 from typing import List, Optional, Set
 
@@ -11,8 +12,10 @@ from azure.core.exceptions import HttpResponseError
 from core.config import settings
 from core.contracts import ChunkRecord, DocumentRecord, PageRecord, TriageDecision
 from agents.classifier_agent import ClassifierAgent, get_classification_memory
+from agents.contracts import ChunkingOutcome, PreprocessorInput
 from agents.message_bus import MessageBus
 from agents.model_gateway import ModelGateway
+from agents.preprocessor_agent import PreprocessorAgent
 from embedding.late_chunking import late_chunk_embeddings
 from ingestion.canonicalize import canonicalize_document
 from core.logging import configure_logging
@@ -163,14 +166,62 @@ def ingest_and_chunk(
     _cache_source_pdf(doc_id, pdf_path)
     with get_connection() as conn:
         pages = repo.fetch_pages(conn, doc_id)
+
+    # ── Classify the document (§4.8) ─────────────────────────────────
+    # Classification runs BEFORE canonicalization so the preprocessor can
+    # use document_type to select the optimal chunking strategy.
+    classification = None
+    resolved_filename = filename or os.path.basename(pdf_path)
+    if settings.enable_classifier:
+        # Build front-matter from raw page text for classification
+        # (canonicalization hasn't run yet — use page triage data)
+        classification = _classify_document_from_pages(
+            doc_id=doc_id,
+            filename=resolved_filename,
+            pages=pages,
+            pdf_path=pdf_path,
+            progress_cb=progress_cb,
+        )
+
+    # ── Preprocessor: determine chunking strategy (§4.9) ─────────────
+    preprocess_result = None
+    if settings.enable_preprocessor:
+        preprocess_result = _run_preprocessor(
+            doc_id=doc_id,
+            filename=resolved_filename,
+            pages=pages,
+            classification=classification,
+            progress_cb=progress_cb,
+        )
+        if preprocess_result and not preprocess_result.requires_chunking:
+            return doc_id
+        if preprocess_result:
+            strategy = preprocess_result.chunking_strategy
+            macro_max_tokens = strategy.macro_max_tokens
+            macro_overlap_tokens = strategy.macro_overlap_tokens
+            child_target_tokens = strategy.child_target_tokens
+
     canonical_pages = canonicalize_document(
         doc_id=doc_id,
         pdf_path=pdf_path,
         pages=pages,
         progress_cb=progress_cb,
     )
+
+    # If classifier hasn't run yet (preprocessor disabled), run it now
+    # on canonical pages as before.
+    if classification is None and settings.enable_classifier:
+        classification = _classify_document(
+            doc_id=doc_id,
+            filename=resolved_filename,
+            canonical_pages=canonical_pages,
+            page_count=len(canonical_pages),
+            progress_cb=progress_cb,
+        )
+
     if progress_cb:
         progress_cb("embed", 0, len(canonical_pages))
+    chunk_start_time = time.monotonic()
     chunks = late_chunk_embeddings(
         canonical_pages,
         macro_max_tokens=macro_max_tokens,
@@ -178,16 +229,7 @@ def ingest_and_chunk(
         child_target_tokens=child_target_tokens,
         progress_cb=progress_cb,
     )
-    # ── Classify the document (§4.8) ─────────────────────────────────
-    classification = None
-    if settings.enable_classifier:
-        classification = _classify_document(
-            doc_id=doc_id,
-            filename=filename or os.path.basename(pdf_path),
-            canonical_pages=canonical_pages,
-            page_count=len(canonical_pages),
-            progress_cb=progress_cb,
-        )
+    chunk_elapsed_ms = (time.monotonic() - chunk_start_time) * 1000
 
     # Stamp classification on chunks before insert
     if classification and chunks:
@@ -228,6 +270,18 @@ def ingest_and_chunk(
                 facts = extract_document_facts(doc_id, chunks)
                 repo.upsert_document_facts(conn, facts)
             conn.commit()
+
+    # ── Record chunking outcome for preprocessor learning (§4.9) ─────
+    if settings.enable_preprocessor and preprocess_result and chunks:
+        _record_chunking_outcome(
+            doc_id=doc_id,
+            preprocess_result=preprocess_result,
+            classification=classification,
+            chunks=chunks,
+            page_count=len(pages),
+            processing_time_ms=chunk_elapsed_ms,
+        )
+
     return doc_id
 
 
@@ -367,3 +421,166 @@ def _classify_document(
         progress_cb("classify_done", 1, 1)
 
     return result
+
+
+def _classify_document_from_pages(
+    doc_id: str,
+    filename: str,
+    pages: list,
+    pdf_path: str,
+    progress_cb=None,
+):
+    """Run the classifier using raw page text (before canonicalization).
+
+    Used when the preprocessor is enabled so classification results are
+    available before chunking strategy selection.
+    """
+    if progress_cb:
+        progress_cb("classify", 0, 1)
+
+    import fitz
+    front_matter_limit = settings.front_matter_pages
+    front_text_parts = []
+    pdf = fitz.open(pdf_path)
+    try:
+        for i in range(min(front_matter_limit, pdf.page_count)):
+            page = pdf.load_page(i)
+            text = page.get_text("text") or ""
+            front_text_parts.append(text)
+    finally:
+        pdf.close()
+    front_matter_text = "\n\n".join(front_text_parts)
+
+    bus = MessageBus()
+    gateway = None
+    try:
+        gateway = ModelGateway()
+    except Exception:
+        pass
+
+    classifier = ClassifierAgent(bus=bus, gateway=gateway)
+    result = classifier.classify(
+        doc_id=doc_id,
+        filename=filename,
+        front_matter_text=front_matter_text,
+        page_count=len(pages),
+    )
+
+    if progress_cb:
+        progress_cb("classify_done", 1, 1)
+
+    return result
+
+
+def _run_preprocessor(
+    doc_id: str,
+    filename: str,
+    pages: list,
+    classification,
+    progress_cb=None,
+):
+    """Run the preprocessor agent to determine chunking strategy (§4.9)."""
+    if progress_cb:
+        progress_cb("preprocess", 0, 1)
+
+    # Build triage summary from page records
+    triage_summary = _build_triage_summary(pages)
+
+    bus = MessageBus()
+    preprocessor = PreprocessorAgent(bus=bus)
+
+    inp = PreprocessorInput(
+        doc_id=doc_id,
+        filename=filename,
+        page_count=len(pages),
+        document_type=classification.document_type if classification else None,
+        classification_label=classification.classification_label if classification else None,
+        classification_confidence=classification.confidence if classification else 0.0,
+        triage_summary=triage_summary,
+    )
+
+    result = preprocessor.determine_strategy(inp)
+
+    if progress_cb:
+        progress_cb("preprocess_done", 1, 1)
+
+    return result
+
+
+def _build_triage_summary(pages: list) -> dict:
+    """Aggregate page-level triage metrics into a document-level summary."""
+    if not pages:
+        return {}
+
+    total_text = 0
+    total_image_coverage = 0.0
+    di_pages = 0
+
+    for p in pages:
+        metrics = p.triage_metrics
+        total_text += metrics.text_length
+        total_image_coverage += metrics.image_coverage_ratio
+        if p.triage_decision == "di_required":
+            di_pages += 1
+
+    page_count = len(pages)
+    return {
+        "total_text_length": total_text,
+        "avg_text_length": total_text / page_count,
+        "avg_image_coverage": total_image_coverage / page_count,
+        "di_page_count": di_pages,
+        "di_page_ratio": di_pages / page_count,
+        "page_count": page_count,
+    }
+
+
+def _record_chunking_outcome(
+    doc_id: str,
+    preprocess_result,
+    classification,
+    chunks: list,
+    page_count: int,
+    processing_time_ms: float,
+) -> None:
+    """Record chunking outcome for preprocessor learning loop (§4.9)."""
+    if not chunks:
+        return
+
+    total = len(chunks)
+    table_count = sum(1 for c in chunks if c.chunk_type == "table")
+    heading_count = sum(1 for c in chunks if c.chunk_type == "heading")
+    boilerplate_count = sum(1 for c in chunks if c.chunk_type == "boilerplate")
+    avg_tokens = sum(len(c.text_content.split()) for c in chunks) / total
+
+    # Compute a simple quality heuristic:
+    # - Penalize very high boilerplate ratio
+    # - Penalize very low or very high chunk counts relative to pages
+    chunks_per_page = total / max(page_count, 1)
+    boilerplate_ratio = boilerplate_count / total
+    quality = 1.0
+    if boilerplate_ratio > 0.3:
+        quality -= 0.3 * boilerplate_ratio
+    if chunks_per_page < 1:
+        quality -= 0.2
+    elif chunks_per_page > 50:
+        quality -= 0.1
+    quality = max(0.0, min(1.0, quality))
+
+    outcome = ChunkingOutcome(
+        doc_id=doc_id,
+        strategy_name=preprocess_result.chunking_strategy.strategy_name,
+        document_type=classification.document_type if classification else "unknown",
+        classification_label=classification.classification_label if classification else "unknown",
+        page_count=page_count,
+        chunk_count=total,
+        avg_chunk_tokens=avg_tokens,
+        table_chunk_ratio=table_count / total,
+        heading_chunk_ratio=heading_count / total,
+        boilerplate_ratio=boilerplate_ratio,
+        processing_time_ms=processing_time_ms,
+        quality_score=quality,
+    )
+
+    bus = MessageBus()
+    preprocessor = PreprocessorAgent(bus=bus)
+    preprocessor.record_outcome(outcome)

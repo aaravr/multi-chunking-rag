@@ -383,6 +383,62 @@ class ClassificationMemoryEntry:
         return self.success_count / self.total_count if self.total_count > 0 else 0.0
 
 
+# ── Preprocessor Agent Contracts (§4.9) ─────────────────────────────
+
+@dataclass(frozen=True)
+class ChunkingStrategy:
+    """Defines HOW a document should be chunked."""
+    strategy_name: str              # "late_chunking" | "table_aware" | "contract_clause" | "regulatory_section" | "skip"
+    macro_max_tokens: int = 8192
+    macro_overlap_tokens: int = 256
+    child_target_tokens: int = 256
+    table_extraction: str = "span"  # "span" | "full_page" | "none"
+    heading_aware: bool = True
+    rationale: str = ""             # Why this strategy was chosen
+
+
+@dataclass(frozen=True)
+class PreprocessorInput:
+    """Input to the Preprocessor Agent — document metadata for chunking decision."""
+    doc_id: str
+    filename: str
+    page_count: int
+    document_type: Optional[str] = None
+    classification_label: Optional[str] = None
+    classification_confidence: float = 0.0
+    triage_summary: Dict[str, Any] = field(default_factory=dict)  # Aggregated page triage stats
+    front_matter_text: str = ""
+
+
+@dataclass(frozen=True)
+class PreprocessorResult:
+    """Output of the Preprocessor Agent — chunking decision + strategy."""
+    doc_id: str
+    requires_chunking: bool
+    chunking_strategy: ChunkingStrategy
+    confidence: float               # 0.0–1.0 confidence in strategy choice
+    decision_method: str            # "deterministic" | "learned" | "default"
+    learned_from_doc_ids: List[str] = field(default_factory=list)  # Prior docs that informed this
+    warnings: List[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ChunkingOutcome:
+    """Feedback record stored after chunking completes — used for learning."""
+    doc_id: str
+    strategy_name: str
+    document_type: str
+    classification_label: str
+    page_count: int
+    chunk_count: int
+    avg_chunk_tokens: float
+    table_chunk_ratio: float        # Fraction of chunks that are tables
+    heading_chunk_ratio: float      # Fraction of chunks that are headings
+    boilerplate_ratio: float        # Fraction of chunks that are boilerplate
+    processing_time_ms: float
+    quality_score: float = 0.0      # Optional quality metric (0–1)
+
+
 def new_id() -> str:
     """Generate a new UUID string."""
     return str(uuid.uuid4())

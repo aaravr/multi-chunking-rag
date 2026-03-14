@@ -203,6 +203,20 @@ Idempotent chunk writes	§13	storage/migrations/003_chunks_idempotency.sql; stor
 
 ⸻
 
+14. Preprocessor Agent — Chunking Strategy Selection (§4.9)
+
+Requirement	Spec Ref	Impl	Tests	Status
+Deterministic doc-type → strategy mapping	§4.9	agents/preprocessor_agent.py (_STRATEGY_RULES)	tests/test_preprocessor_agent.py::TestDeterministicStrategy	Complete
+Learned strategy from past outcomes	§4.9	agents/preprocessor_agent.py (OutcomeStore)	tests/test_preprocessor_agent.py::TestLearnedStrategy	Complete
+Skip decision for empty/zero-page docs	§4.9	agents/preprocessor_agent.py (Tier 0)	tests/test_preprocessor_agent.py::TestSkipDecision	Complete
+Triage-based strategy adjustment	§4.9	agents/preprocessor_agent.py (_adjust_for_triage)	tests/test_preprocessor_agent.py::TestTriageAdjustments	Complete
+Typed contracts (PreprocessorInput/Result/Strategy/Outcome)	§4.9	agents/contracts.py	tests/test_preprocessor_agent.py::TestMessageBusIntegration	Complete
+Feature flag ENABLE_PREPROCESSOR	§4.9	core/config.py	Manual toggle test	Complete
+Ingestion pipeline integration	§4.9	ingestion/ingest_pipeline.py (_run_preprocessor, _record_chunking_outcome)	tests/test_preprocessor_agent.py	Complete
+Chunking outcome learning loop	§4.9	agents/preprocessor_agent.py (record_outcome)	tests/test_preprocessor_agent.py::TestOutcomeStore	Complete
+
+⸻
+
 Usage Rule
 	•	Every PR MUST update this file if it adds, completes, or modifies a requirement.
 	•	A PR that touches code without updating traceability must be rejected.

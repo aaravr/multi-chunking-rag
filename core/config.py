@@ -80,6 +80,7 @@ class Settings:
     coverage_mode: str = os.getenv("COVERAGE_MODE", "llm_fallback")
     enable_document_facts: bool = _get_bool_env("ENABLE_DOCUMENT_FACTS", False)
     enable_classifier: bool = _get_bool_env("ENABLE_CLASSIFIER", False)
+    enable_preprocessor: bool = _get_bool_env("ENABLE_PREPROCESSOR", False)
     front_matter_pages: int = int(os.getenv("FRONT_MATTER_PAGES", "10"))
     reranker_model: str = os.getenv(
         "RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2"
