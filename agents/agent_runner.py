@@ -575,33 +575,38 @@ def _build_security_config() -> Dict[str, Any]:
 # =====================================================================
 
 
+_AGENT_REGISTRY: Dict[str, str] = {
+    "router": "agents.router_agent.RouterAgent",
+    "retriever": "agents.retriever_agent.RetrieverAgent",
+    "synthesiser": "agents.synthesiser_agent.SynthesiserAgent",
+    "verifier": "agents.verifier_agent.VerifierAgent",
+}
+
+
 def _create_agent(agent_name: str) -> Callable:
     """Factory: instantiate the named agent and return its handler.
 
     Each agent needs a MessageBus for local registration (even in Kafka mode,
     agents may call sub-agents locally). We create a minimal local bus.
     """
+    qualified_name = _AGENT_REGISTRY.get(agent_name)
+    if qualified_name is None:
+        raise ValueError(
+            f"Unknown agent: {agent_name}. "
+            f"Available: {', '.join(sorted(_AGENT_REGISTRY))}"
+        )
+
+    module_path, class_name = qualified_name.rsplit(".", 1)
+    import importlib
+    module = importlib.import_module(module_path)
+    agent_class = getattr(module, class_name)
+
     from agents.message_bus import MessageBus
     from agents.model_gateway import ModelGateway
 
     bus = MessageBus()
     gateway = ModelGateway()
-
-    if agent_name == "router":
-        from agents.router_agent import RouterAgent
-        agent = RouterAgent(bus, gateway)
-    elif agent_name == "retriever":
-        from agents.retriever_agent import RetrieverAgent
-        agent = RetrieverAgent(bus, gateway)
-    elif agent_name == "synthesiser":
-        from agents.synthesiser_agent import SynthesiserAgent
-        agent = SynthesiserAgent(bus, gateway)
-    elif agent_name == "verifier":
-        from agents.verifier_agent import VerifierAgent
-        agent = VerifierAgent(bus, gateway)
-    else:
-        raise ValueError(f"Unknown agent: {agent_name}")
-
+    agent = agent_class(bus, gateway)
     return agent.handle_message
 
 

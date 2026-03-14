@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_TTL_SECONDS = 900  # 15 minutes
 
 
-def _key(query_id: str, field: str) -> str:
+def _redis_key(query_id: str, field: str) -> str:
     """Build a namespaced Redis key."""
     return f"wm:{query_id}:{field}"
 
@@ -218,23 +218,23 @@ class RedisBackend(WorkingMemoryStore):
 
     def _touch(self, query_id: str, field: str) -> None:
         """Reset TTL on a key."""
-        self._client.expire(_key(query_id, field), self._ttl)
+        self._client.expire(_redis_key(query_id, field), self._ttl)
 
     def _touch_all(self, query_id: str) -> None:
         """Reset TTL on all keys for a query."""
         for field in ("state", "plan", "evidence", "trace", "budget"):
-            self._client.expire(_key(query_id, field), self._ttl)
+            self._client.expire(_redis_key(query_id, field), self._ttl)
 
     # ── Scalar state ────────────────────────────────────────────────
 
     def set_state(self, query_id: str, state: Dict[str, Any]) -> None:
-        key = _key(query_id, "state")
+        key = _redis_key(query_id, "state")
         # Store as JSON string for complex nested values
         self._client.set(key, json.dumps(state))
         self._client.expire(key, self._ttl)
 
     def get_state(self, query_id: str) -> Optional[Dict[str, Any]]:
-        raw = self._client.get(_key(query_id, "state"))
+        raw = self._client.get(_redis_key(query_id, "state"))
         if raw is None:
             return None
         return json.loads(raw)
@@ -247,12 +247,12 @@ class RedisBackend(WorkingMemoryStore):
     # ── Plan ────────────────────────────────────────────────────────
 
     def set_plan(self, query_id: str, plan: Dict[str, Any]) -> None:
-        key = _key(query_id, "plan")
+        key = _redis_key(query_id, "plan")
         self._client.set(key, json.dumps(plan))
         self._client.expire(key, self._ttl)
 
     def get_plan(self, query_id: str) -> Optional[Dict[str, Any]]:
-        raw = self._client.get(_key(query_id, "plan"))
+        raw = self._client.get(_redis_key(query_id, "plan"))
         if raw is None:
             return None
         return json.loads(raw)
@@ -260,7 +260,7 @@ class RedisBackend(WorkingMemoryStore):
     # ── Evidence ────────────────────────────────────────────────────
 
     def append_evidence(self, query_id: str, chunks: List[Dict[str, Any]]) -> None:
-        key = _key(query_id, "evidence")
+        key = _redis_key(query_id, "evidence")
         pipe = self._client.pipeline()
         for chunk in chunks:
             pipe.rpush(key, json.dumps(chunk))
@@ -268,13 +268,13 @@ class RedisBackend(WorkingMemoryStore):
         pipe.execute()
 
     def get_evidence(self, query_id: str) -> List[Dict[str, Any]]:
-        raw_list = self._client.lrange(_key(query_id, "evidence"), 0, -1)
+        raw_list = self._client.lrange(_redis_key(query_id, "evidence"), 0, -1)
         return [json.loads(item) for item in raw_list]
 
     # ── Trace ───────────────────────────────────────────────────────
 
     def append_trace(self, query_id: str, step: Dict[str, Any]) -> None:
-        key = _key(query_id, "trace")
+        key = _redis_key(query_id, "trace")
         steps = step if isinstance(step, list) else [step]
         pipe = self._client.pipeline()
         for s in steps:
@@ -283,24 +283,24 @@ class RedisBackend(WorkingMemoryStore):
         pipe.execute()
 
     def get_trace(self, query_id: str) -> List[Dict[str, Any]]:
-        raw_list = self._client.lrange(_key(query_id, "trace"), 0, -1)
+        raw_list = self._client.lrange(_redis_key(query_id, "trace"), 0, -1)
         return [json.loads(item) for item in raw_list]
 
     # ── Budget ──────────────────────────────────────────────────────
 
     def set_budget(self, query_id: str, budget: int) -> None:
-        key = _key(query_id, "budget")
+        key = _redis_key(query_id, "budget")
         self._client.set(key, str(budget))
         self._client.expire(key, self._ttl)
 
     def decrement_budget(self, query_id: str, tokens: int) -> int:
-        key = _key(query_id, "budget")
+        key = _redis_key(query_id, "budget")
         new_val = self._client.decrby(key, tokens)
         self._touch(query_id, "budget")
         return new_val
 
     def get_budget(self, query_id: str) -> int:
-        raw = self._client.get(_key(query_id, "budget"))
+        raw = self._client.get(_redis_key(query_id, "budget"))
         if raw is None:
             return 0
         return int(raw)
@@ -310,7 +310,7 @@ class RedisBackend(WorkingMemoryStore):
     def expire(self, query_id: str) -> None:
         pipe = self._client.pipeline()
         for field in ("state", "plan", "evidence", "trace", "budget"):
-            pipe.delete(_key(query_id, field))
+            pipe.delete(_redis_key(query_id, field))
         pipe.execute()
 
 

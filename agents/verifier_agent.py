@@ -135,10 +135,10 @@ class VerifierAgent(BaseAgent):
     def _verify_qa(
         self, query: str, answer: str, chunks: List[RetrievedChunk]
     ) -> tuple:
-        """Verify standard QA answers. Uses LLM if gateway available, else skip."""
+        """Verify standard QA answers. Uses Model Gateway (§7.3) if available."""
         from synthesis.verifier import verify_answer
         try:
-            return verify_answer(query, answer, chunks)
+            return verify_answer(query, answer, chunks, gateway=self.gateway)
         except RuntimeError:
             # No API key — return cautious pass
             return "YES", "Verification skipped (no API key available)"

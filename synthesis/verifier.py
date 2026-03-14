@@ -7,26 +7,50 @@ from openai import OpenAI
 from core.contracts import RetrievedChunk
 
 
-SYSTEM = """You are an auditing verifier. Decide if the answer is fully supported by the provided sources.
-Return YES or NO and a brief rationale."""
+VERIFICATION_SYSTEM_PROMPT = (
+    "You are an auditing verifier. Decide if the answer is fully supported "
+    "by the provided sources.\nReturn YES or NO and a brief rationale."
+)
 
 
-def verify_answer(question: str, answer: str, chunks: List[RetrievedChunk]) -> Tuple[str, str]:
-    api_key = os.getenv("OPENAI_API_KEY", "")
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is required for verification.")
-    client = OpenAI(api_key=api_key)
-    sources = "\n".join([f"[C{i+1}] {c.text_content}" for i, c in enumerate(chunks)])
-    prompt = f"Question: {question}\nAnswer: {answer}\nSources:\n{sources}"
-    response = client.chat.completions.create(
-        model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-        messages=[
-            {"role": "system", "content": SYSTEM},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.0,
-    )
-    content = response.choices[0].message.content.strip()
+def verify_answer(
+    question: str,
+    answer: str,
+    chunks: List[RetrievedChunk],
+    gateway=None,
+) -> Tuple[str, str]:
+    """Verify an answer against source chunks.
+
+    Uses the Model Gateway (§7.3) when provided, otherwise falls back to
+    a direct OpenAI call for backward compatibility.
+    """
+    sources = "\n".join(f"[C{i+1}] {c.text_content}" for i, c in enumerate(chunks))
+    user_prompt = f"Question: {question}\nAnswer: {answer}\nSources:\n{sources}"
+    messages = [
+        {"role": "system", "content": VERIFICATION_SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
+
+    if gateway is not None:
+        result = gateway.call_model(
+            model_id=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            messages=messages,
+            temperature=0.0,
+            agent_id="verifier",
+        )
+        content = result.get("content", "").strip()
+    else:
+        api_key = os.getenv("OPENAI_API_KEY", "")
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY is required for verification.")
+        client = OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            messages=messages,
+            temperature=0.0,
+        )
+        content = response.choices[0].message.content.strip()
+
     lines = content.splitlines()
     verdict = lines[0].strip().upper() if lines else "NO"
     rationale = "\n".join(lines[1:]).strip()
@@ -78,9 +102,9 @@ def verify_coverage_attribute(
     span = _extract_numeric_span(answer)
     if not span:
         return "NO", "Missing numeric span in answer."
-    span_norm = _normalize_span(span)
+    span_norm = _normalize_text(span)
     for chunk in cited_chunks:
-        chunk_norm = _normalize_span(chunk.text_content)
+        chunk_norm = _normalize_text(chunk.text_content)
         if span_norm and span_norm in chunk_norm:
             return "YES", "Numeric span matches cited chunks."
     return "NO", "Numeric span not found in cited chunks."
@@ -102,10 +126,14 @@ def _parse_coverage_items(answer: str) -> List[Tuple[str, str]]:
     return items
 
 
-def _normalize_tokens(text: str) -> set:
+def _normalize_text(text: str) -> str:
+    """Normalize text to lowercase alphanumeric tokens separated by spaces."""
     normalized = re.sub(r"[^a-z0-9\s]", " ", text.lower())
-    normalized = re.sub(r"\s+", " ", normalized).strip()
-    return set(normalized.split())
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def _normalize_tokens(text: str) -> set:
+    return set(_normalize_text(text).split())
 
 
 def _extract_cited_chunks(
@@ -140,8 +168,3 @@ def _extract_numeric_span(text: str) -> str:
     if match:
         return match.group(0)
     return ""
-
-
-def _normalize_span(text: str) -> str:
-    normalized = re.sub(r"[^a-z0-9\s]", " ", text.lower())
-    return re.sub(r"\s+", " ", normalized).strip()

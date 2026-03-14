@@ -178,11 +178,12 @@ def ingest_and_chunk(
     if settings.enable_classifier:
         # Build front-matter from raw page text for classification
         # (canonicalization hasn't run yet — use page triage data)
-        classification = _classify_document_from_pages(
+        front_matter = _extract_front_matter_from_pdf(pdf_path)
+        classification = _run_classifier(
             doc_id=doc_id,
             filename=resolved_filename,
-            pages=pages,
-            pdf_path=pdf_path,
+            front_matter_text=front_matter,
+            page_count=len(pages),
             progress_cb=progress_cb,
         )
 
@@ -232,10 +233,11 @@ def ingest_and_chunk(
     # If classifier hasn't run yet (preprocessor disabled), run it now
     # on canonical pages as before.
     if classification is None and settings.enable_classifier:
-        classification = _classify_document(
+        front_matter = _extract_front_matter_from_canonical(canonical_pages)
+        classification = _run_classifier(
             doc_id=doc_id,
             filename=resolved_filename,
-            canonical_pages=canonical_pages,
+            front_matter_text=front_matter,
             page_count=len(canonical_pages),
             progress_cb=progress_cb,
         )
@@ -262,26 +264,37 @@ def ingest_and_chunk(
 
     chunk_elapsed_ms = (time.monotonic() - chunk_start_time) * 1000
 
-    # Stamp classification on chunks before insert
+    chunks = _stamp_and_store_chunks(
+        doc_id=doc_id,
+        chunks=chunks,
+        classification=classification,
+    )
+
+    # ── Record processing outcome for preprocessor learning (§4.9) ───
+    if settings.enable_preprocessor and preprocess_result and chunks:
+        _record_chunking_outcome(
+            doc_id=doc_id,
+            preprocess_result=preprocess_result,
+            classification=classification,
+            chunks=chunks,
+            page_count=len(pages),
+            processing_time_ms=chunk_elapsed_ms,
+        )
+
+    return doc_id
+
+
+def _stamp_and_store_chunks(
+    doc_id: str,
+    chunks: List[ChunkRecord],
+    classification,
+) -> List[ChunkRecord]:
+    """Stamp classification on chunks and persist to the database."""
     if classification and chunks:
+        from dataclasses import replace
         chunks = [
-            ChunkRecord(
-                chunk_id=c.chunk_id,
-                doc_id=c.doc_id,
-                page_numbers=c.page_numbers,
-                macro_id=c.macro_id,
-                child_id=c.child_id,
-                chunk_type=c.chunk_type,
-                text_content=c.text_content,
-                char_start=c.char_start,
-                char_end=c.char_end,
-                polygons=c.polygons,
-                source_type=c.source_type,
-                embedding_model=c.embedding_model,
-                embedding_dim=c.embedding_dim,
-                embedding=c.embedding,
-                heading_path=c.heading_path,
-                section_id=c.section_id,
+            replace(
+                c,
                 document_type=classification.document_type,
                 classification_label=classification.classification_label,
             )
@@ -302,18 +315,7 @@ def ingest_and_chunk(
                 repo.upsert_document_facts(conn, facts)
             conn.commit()
 
-    # ── Record processing outcome for preprocessor learning (§4.9) ───
-    if settings.enable_preprocessor and preprocess_result and chunks:
-        _record_chunking_outcome(
-            doc_id=doc_id,
-            preprocess_result=preprocess_result,
-            classification=classification,
-            chunks=chunks,
-            page_count=len(pages),
-            processing_time_ms=chunk_elapsed_ms,
-        )
-
-    return doc_id
+    return chunks
 
 
 def _cache_source_pdf(doc_id: str, pdf_path: str) -> None:
@@ -339,30 +341,30 @@ def _build_page_record(
     )
 
 
+def _append_triage_reason(
+    triage: TriageDecision, reason: str, decision: Optional[str] = None
+) -> TriageDecision:
+    """Return a new TriageDecision with an appended reason code and optional decision override."""
+    reason_codes = list(triage.reason_codes)
+    if reason not in reason_codes:
+        reason_codes.append(reason)
+    return TriageDecision(
+        metrics=triage.metrics,
+        decision=decision or triage.decision,
+        reason_codes=reason_codes,
+    )
+
+
 def _apply_force_di(
     triage: TriageDecision, page_number: int, force_set: Set[int]
 ) -> TriageDecision:
     if page_number not in force_set:
         return triage
-    reason_codes = list(triage.reason_codes)
-    if "force_di" not in reason_codes:
-        reason_codes.append("force_di")
-    return TriageDecision(
-        metrics=triage.metrics,
-        decision="di_required",
-        reason_codes=reason_codes,
-    )
+    return _append_triage_reason(triage, "force_di", decision="di_required")
 
 
 def _apply_disable_di(triage: TriageDecision) -> TriageDecision:
-    reason_codes = list(triage.reason_codes)
-    if "di_disabled" not in reason_codes:
-        reason_codes.append("di_disabled")
-    return TriageDecision(
-        metrics=triage.metrics,
-        decision=triage.decision,
-        reason_codes=reason_codes,
-    )
+    return _append_triage_reason(triage, "di_disabled")
 
 
 def _compute_sha256(path: str) -> str:
@@ -409,29 +411,37 @@ def _write_json(path: str, payload: dict) -> None:
         json.dump(payload, handle, ensure_ascii=True, indent=2)
 
 
-def _classify_document(
+def _extract_front_matter_from_canonical(canonical_pages: list) -> str:
+    """Extract front-matter text from the first N canonical pages."""
+    limit = settings.front_matter_pages
+    return "\n\n".join(page.text for page in canonical_pages[:limit])
+
+
+def _extract_front_matter_from_pdf(pdf_path: str) -> str:
+    """Extract front-matter text from the first N raw PDF pages."""
+    import fitz as fitz_mod
+    limit = settings.front_matter_pages
+    parts = []
+    pdf = fitz_mod.open(pdf_path)
+    try:
+        for i in range(min(limit, pdf.page_count)):
+            parts.append(pdf.load_page(i).get_text("text") or "")
+    finally:
+        pdf.close()
+    return "\n\n".join(parts)
+
+
+def _run_classifier(
     doc_id: str,
     filename: str,
-    canonical_pages: list,
+    front_matter_text: str,
     page_count: int,
     progress_cb=None,
 ):
-    """Run the classifier agent on the document front matter.
-
-    Extracts text from the first N pages (configured by front_matter_pages)
-    and passes it to the ClassifierAgent for classification.
-    """
+    """Run the ClassifierAgent on pre-extracted front-matter text."""
     if progress_cb:
         progress_cb("classify", 0, 1)
 
-    # Build front-matter text from first N canonical pages
-    front_matter_limit = settings.front_matter_pages
-    front_text_parts = []
-    for page in canonical_pages[:front_matter_limit]:
-        front_text_parts.append(page.text)
-    front_matter_text = "\n\n".join(front_text_parts)
-
-    # Create a lightweight classifier (no LLM gateway in basic mode)
     bus = MessageBus()
     gateway = None
     try:
@@ -440,61 +450,11 @@ def _classify_document(
         pass
 
     classifier = ClassifierAgent(bus=bus, gateway=gateway)
-
     result = classifier.classify(
         doc_id=doc_id,
         filename=filename,
         front_matter_text=front_matter_text,
         page_count=page_count,
-    )
-
-    if progress_cb:
-        progress_cb("classify_done", 1, 1)
-
-    return result
-
-
-def _classify_document_from_pages(
-    doc_id: str,
-    filename: str,
-    pages: list,
-    pdf_path: str,
-    progress_cb=None,
-):
-    """Run the classifier using raw page text (before canonicalization).
-
-    Used when the preprocessor is enabled so classification results are
-    available before chunking strategy selection.
-    """
-    if progress_cb:
-        progress_cb("classify", 0, 1)
-
-    import fitz
-    front_matter_limit = settings.front_matter_pages
-    front_text_parts = []
-    pdf = fitz.open(pdf_path)
-    try:
-        for i in range(min(front_matter_limit, pdf.page_count)):
-            page = pdf.load_page(i)
-            text = page.get_text("text") or ""
-            front_text_parts.append(text)
-    finally:
-        pdf.close()
-    front_matter_text = "\n\n".join(front_text_parts)
-
-    bus = MessageBus()
-    gateway = None
-    try:
-        gateway = ModelGateway()
-    except Exception:
-        pass
-
-    classifier = ClassifierAgent(bus=bus, gateway=gateway)
-    result = classifier.classify(
-        doc_id=doc_id,
-        filename=filename,
-        front_matter_text=front_matter_text,
-        page_count=len(pages),
     )
 
     if progress_cb:
@@ -575,45 +535,6 @@ def _get_gateway_if_needed(strategy_name: str):
     return None
 
 
-def _dispatch_chunking_strategy(
-    doc_id: str,
-    canonical_pages: list,
-    strategy_name: str,
-    macro_max_tokens: int,
-    macro_overlap_tokens: int,
-    child_target_tokens: int,
-    progress_cb=None,
-    gateway=None,
-) -> List[ChunkRecord]:
-    """Dispatch to the appropriate chunking strategy by strategy_name.
-
-    Checks the strategy registry from ``embedding.chunking_strategies``
-    first.  If the strategy_name is not a registered alternative strategy
-    (i.e. it's a parameter preset like "sec_filing" or "financial_report"),
-    falls back to the standard late_chunk_embeddings pipeline.
-    """
-    from embedding.chunking_strategies import get_strategy_dispatch
-
-    dispatch = get_strategy_dispatch()
-    strategy_fn = dispatch.get(strategy_name)
-
-    if strategy_fn is not None:
-        kwargs: dict = {}
-        # Pass gateway for LLM-dependent strategies
-        if strategy_name in ("proposition", "summary_indexed"):
-            kwargs["gateway"] = gateway
-        return strategy_fn(doc_id, canonical_pages, **kwargs)
-
-    # Default: standard late chunking with strategy parameters
-    return late_chunk_embeddings(
-        canonical_pages,
-        macro_max_tokens=macro_max_tokens,
-        macro_overlap_tokens=macro_overlap_tokens,
-        child_target_tokens=child_target_tokens,
-        progress_cb=progress_cb,
-    )
-
-
 def _process_metadata_only(
     doc_id: str,
     pdf_path: str,
@@ -685,6 +606,28 @@ def _process_metadata_only(
     )
 
 
+def _collect_span_lineage(
+    spans: List[CanonicalSpan], polygon_limit: int = 100
+) -> tuple:
+    """Extract lineage metadata (polygons, source_type, heading, section) from spans.
+
+    Returns (polygons, source_type, heading_path, section_id).
+    """
+    polygons: list = []
+    source_type = "native"
+    heading_path = ""
+    section_id = ""
+    for span in spans:
+        polygons.extend(span.polygons)
+        if span.source_type == "di":
+            source_type = "di"
+        if span.heading_path and not heading_path:
+            heading_path = span.heading_path
+        if span.section_id and not section_id:
+            section_id = span.section_id
+    return polygons[:polygon_limit], source_type, heading_path, section_id
+
+
 def _build_single_chunk(
     doc_id: str,
     canonical_pages: List[CanonicalPage],
@@ -703,21 +646,11 @@ def _build_single_chunk(
     embedder = get_embedding_model()
     embedding = embedder.embed_text(all_text[:8192 * 4])  # safety limit
 
-    # Collect lineage from all pages
     all_pages = sorted({p.page_number for p in canonical_pages})
-    all_polygons: list = []
-    source_type = "native"
-    heading_path = ""
-    section_id = ""
-    for page in canonical_pages:
-        for span in page.spans:
-            all_polygons.extend(span.polygons)
-            if span.source_type == "di":
-                source_type = "di"
-            if span.heading_path and not heading_path:
-                heading_path = span.heading_path
-            if span.section_id and not section_id:
-                section_id = span.section_id
+    all_spans = [span for page in canonical_pages for span in page.spans]
+    polygons, source_type, heading_path, section_id = _collect_span_lineage(
+        all_spans, polygon_limit=100
+    )
 
     chunk = ChunkRecord(
         chunk_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{doc_id}:single:0")),
@@ -729,7 +662,7 @@ def _build_single_chunk(
         text_content=all_text,
         char_start=0,
         char_end=len(all_text),
-        polygons=all_polygons[:100],  # limit polygon count
+        polygons=polygons,
         source_type=source_type,
         embedding_model=settings.embedding_model,
         embedding_dim=settings.embedding_dim,
@@ -762,20 +695,9 @@ def _build_page_level_chunks(
             continue
 
         embedding = embedder.embed_text(page.text)
-
-        # Collect lineage from page spans
-        page_polygons: list = []
-        source_type = "native"
-        heading_path = ""
-        section_id = ""
-        for span in page.spans:
-            page_polygons.extend(span.polygons)
-            if span.source_type == "di":
-                source_type = "di"
-            if span.heading_path and not heading_path:
-                heading_path = span.heading_path
-            if span.section_id and not section_id:
-                section_id = span.section_id
+        polygons, source_type, heading_path, section_id = _collect_span_lineage(
+            page.spans, polygon_limit=50
+        )
 
         chunk = ChunkRecord(
             chunk_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{doc_id}:page:{page.page_number}")),
@@ -787,7 +709,7 @@ def _build_page_level_chunks(
             text_content=page.text,
             char_start=0,
             char_end=len(page.text),
-            polygons=page_polygons[:50],  # limit polygon count per page
+            polygons=polygons,
             source_type=source_type,
             embedding_model=settings.embedding_model,
             embedding_dim=settings.embedding_dim,

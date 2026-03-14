@@ -618,14 +618,6 @@ def _is_front_matter_reference(text: str) -> bool:
     )
 
 
-def _has_enumerated_list(text: str) -> bool:
-    return bool(re.search(r"(^|[\n\s])([\-•]|\d+\)|\d+\.)\s", text))
-
-
-def _has_multiple_labeled_numbers(text: str) -> bool:
-    return _count_financial_impact_mentions(text) >= 2
-
-
 def _has_items_of_note_reconciliation_signal(text: str) -> bool:
     if "items of note" in text:
         return True

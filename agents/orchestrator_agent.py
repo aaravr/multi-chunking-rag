@@ -108,11 +108,11 @@ class OrchestratorAgent(BaseAgent):
         self._decision_chain = []
         query_id = inp.query_id
         start = time.monotonic()
-        mem = self._memory
+        working_mem = self._memory
 
         # Initialise working memory for this query
-        mem.set_budget(query_id, inp.token_budget)
-        mem.set_state(query_id, {
+        working_mem.set_budget(query_id, inp.token_budget)
+        working_mem.set_state(query_id, {
             "phase": "routing",
             "iteration": 0,
             "confidence": 0.0,
@@ -128,13 +128,13 @@ class OrchestratorAgent(BaseAgent):
         )
 
         # Persist plan to working memory
-        mem.set_plan(query_id, {
+        working_mem.set_plan(query_id, {
             "primary_intent": plan.primary_intent.intent,
             "sub_query_count": len(plan.sub_queries),
             "original_query": plan.original_query,
             "resolved_query": plan.resolved_query,
         })
-        mem.update_state(query_id, {"phase": "retrieval"})
+        working_mem.update_state(query_id, {"phase": "retrieval"})
 
         # ── ACT + OBSERVE: Execute sub-queries ───────────────────────
         all_chunks = []
@@ -168,7 +168,7 @@ class OrchestratorAgent(BaseAgent):
             all_chunks.extend(evidence.chunks)
 
             # Persist evidence to working memory
-            mem.append_evidence(query_id, [
+            working_mem.append_evidence(query_id, [
                 {"chunk_index": i, "sub_query_id": sq.sub_query_id}
                 for i in range(len(evidence.chunks))
             ])
@@ -180,14 +180,14 @@ class OrchestratorAgent(BaseAgent):
                 self._log_decision("evidence_check", f"Only {len(all_chunks)} chunks — continuing")
 
             iteration += 1
-            mem.update_state(query_id, {"iteration": iteration})
+            working_mem.update_state(query_id, {"iteration": iteration})
 
         # ── THINK: Synthesise ─────────────────────────────────────────
         if not all_chunks:
-            mem.expire(query_id)
+            working_mem.expire(query_id)
             return self._empty_response(query_id, "No evidence found for query.")
 
-        mem.update_state(query_id, {"phase": "synthesis"})
+        working_mem.update_state(query_id, {"phase": "synthesis"})
         self._log_step("synthesise", "running")
         synthesis = self._synthesise(
             query_id=query_id,
@@ -205,7 +205,7 @@ class OrchestratorAgent(BaseAgent):
         )
 
         # ── OBSERVE: Verify ──────────────────────────────────────────
-        mem.update_state(query_id, {"phase": "verification"})
+        working_mem.update_state(query_id, {"phase": "verification"})
         self._log_step("verify", "running")
         verification = self._verify(
             query_id=query_id,
@@ -221,12 +221,12 @@ class OrchestratorAgent(BaseAgent):
         )
 
         # ── ASSEMBLE: Build final response ───────────────────────────
-        mem.update_state(query_id, {"phase": "assembly"})
+        working_mem.update_state(query_id, {"phase": "assembly"})
         total_ms = (time.monotonic() - start) * 1000
         confidence = verification.overall_confidence
 
         # Persist execution trace to working memory
-        mem.append_trace(query_id, [
+        working_mem.append_trace(query_id, [
             {"action": s.action, "status": s.status, "summary": s.result_summary}
             for s in self._execution_trace
         ])
@@ -271,11 +271,11 @@ class OrchestratorAgent(BaseAgent):
         )
 
         # Clean up working memory — query lifecycle complete
-        mem.update_state(query_id, {
+        working_mem.update_state(query_id, {
             "phase": "completed",
             "confidence": confidence,
         })
-        mem.expire(query_id)
+        working_mem.expire(query_id)
 
         # Record query-level eval
         from agents.agent_eval import QueryEval, get_evaluator

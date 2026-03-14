@@ -98,11 +98,11 @@ class SynthesiserAgent(BaseAgent):
         # For coverage queries, try deterministic extraction first
         if intent_type == "coverage" and coverage_type != "attribute":
             if mode in ("deterministic", "llm_fallback"):
-                det_result = self._try_deterministic_coverage(
+                deterministic_result = self._try_deterministic_coverage(
                     query, chunks, query_id, template, mode,
                 )
-                if det_result is not None:
-                    return det_result
+                if deterministic_result is not None:
+                    return deterministic_result
 
         # LLM synthesis via Model Gateway
         if self.gateway is None:
@@ -179,7 +179,7 @@ class SynthesiserAgent(BaseAgent):
         if mode == "deterministic" or len(items) >= MIN_ITEMS:
             answer = format_coverage_answer(query, chunks)
             citations = self._extract_citations(answer, chunks)
-            det_result = SynthesisResult(
+            deterministic_result = SynthesisResult(
                 query_id=query_id,
                 answer=answer,
                 citations=citations,
@@ -198,7 +198,7 @@ class SynthesiserAgent(BaseAgent):
                 evidence_chunks_used=len(chunks),
             ))
 
-            return det_result
+            return deterministic_result
         return None
 
     def _format_sources(self, chunks: List[RetrievedChunk]) -> str:
