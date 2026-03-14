@@ -15,7 +15,7 @@ import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from agents.contracts import AuditLogEntry, ModelAttribution, new_id
 
@@ -111,12 +111,16 @@ class ModelGateway:
     The gateway validates, logs, rate-limits, and circuit-breaks.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        llm_caller: Optional[Callable[..., Dict[str, Any]]] = None,
+    ) -> None:
         self._registry: Dict[str, RegisteredModel] = dict(_MODEL_REGISTRY)
         self._circuits: Dict[str, CircuitState] = {}
         self._audit_entries: List[AuditLogEntry] = []
         self._total_tokens: int = 0
         self._total_cost: float = 0.0
+        self._llm_caller = llm_caller
 
     def register_model(self, model: RegisteredModel) -> None:
         """Add or update a model in the registry."""
@@ -271,7 +275,10 @@ class ModelGateway:
         messages: List[Dict[str, str]],
         temperature: float,
     ) -> Dict[str, Any]:
-        """Execute the actual OpenAI API call."""
+        """Execute an LLM call via injected callable or default OpenAI client (DIP)."""
+        if self._llm_caller is not None:
+            return self._llm_caller(model_id, messages, temperature)
+
         from openai import OpenAI
 
         api_key = os.getenv("OPENAI_API_KEY", "")

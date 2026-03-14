@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from synthesis import prompts as poc_prompts
 
@@ -108,6 +108,16 @@ CLASSIFICATION = _register(_make_template(
 ))
 
 
+# Lookup table for deterministic template selection (§4.4, OCP).
+# Key: (intent_type, coverage_subtype, status_filter)
+# Entries are checked in order; first match wins. None matches any value.
+_TEMPLATE_LOOKUP: List[Tuple[Tuple[Optional[str], Optional[str], Optional[str]], PromptTemplate]] = [
+    (("coverage", None, "closed"), COVERAGE_CLOSED),
+    (("coverage", "attribute", None), COVERAGE_ATTRIBUTE),
+    (("coverage", None, None), COVERAGE_LIST),
+]
+
+
 def get_template(
     intent_type: str,
     coverage_subtype: Optional[str] = None,
@@ -116,13 +126,16 @@ def get_template(
     """Select the correct prompt template based on query classification.
 
     Template selection is deterministic (§4.4).
+    New templates can be added to _TEMPLATE_LOOKUP without modifying this function.
     """
-    if intent_type == "coverage":
-        if status_filter == "closed":
-            return COVERAGE_CLOSED
-        if coverage_subtype == "attribute":
-            return COVERAGE_ATTRIBUTE
-        return COVERAGE_LIST
+    for (match_intent, match_subtype, match_status), template in _TEMPLATE_LOOKUP:
+        if match_intent is not None and match_intent != intent_type:
+            continue
+        if match_subtype is not None and match_subtype != coverage_subtype:
+            continue
+        if match_status is not None and match_status != status_filter:
+            continue
+        return template
 
     # Default: semantic QA template (also used for location, comparison, etc.)
     return SEMANTIC_QA

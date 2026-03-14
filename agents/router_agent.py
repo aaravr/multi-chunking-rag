@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import re
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from agents.base import BaseAgent
 from agents.contracts import (
@@ -52,6 +52,44 @@ _METADATA_PATTERNS = [
     re.compile(r"\bwhat\s+(?:is|are)\s+the\s+(?:(?:reporting\s+)?currency|(?:presentation\s+)?currency|reporting\s+period|framework)\b", re.IGNORECASE),
     re.compile(r"\bwhat\s+(?:type|kind)\s+of\s+document\b", re.IGNORECASE),
 ]
+
+
+# Registry of extended intent classifiers (OCP — add new intents without modifying _classify_extended).
+# Each entry: (patterns, intent_factory) where intent_factory(query) -> QueryIntent.
+_EXTENDED_INTENT_REGISTRY: List[Tuple[List[re.Pattern], Callable[[str], QueryIntent]]] = []
+
+
+def _register_extended_intent(
+    patterns: List[re.Pattern],
+    intent_factory: Callable[[str], QueryIntent],
+) -> None:
+    """Register an extended intent type with its patterns and factory."""
+    _EXTENDED_INTENT_REGISTRY.append((patterns, intent_factory))
+
+
+def _extract_comparison_entities(query: str) -> List[str]:
+    """Extract entities being compared from the query."""
+    parts = re.split(r"\bvs\.?\b|\bversus\b|\band\b|\bwith\b", query, flags=re.IGNORECASE)
+    return [p.strip() for p in parts if len(p.strip()) > 3]
+
+
+# Register built-in extended intents
+_register_extended_intent(
+    _COMPARISON_PATTERNS,
+    lambda q: QueryIntent(intent="comparison", entities=_extract_comparison_entities(q)),
+)
+_register_extended_intent(
+    _MULTI_HOP_PATTERNS,
+    lambda q: QueryIntent(intent="multi_hop"),
+)
+_register_extended_intent(
+    _AGGREGATION_PATTERNS,
+    lambda q: QueryIntent(intent="aggregation", coverage_type="numeric_list"),
+)
+_register_extended_intent(
+    _METADATA_PATTERNS,
+    lambda q: QueryIntent(intent="metadata"),
+)
 
 
 class RouterAgent(BaseAgent):
@@ -164,50 +202,18 @@ class RouterAgent(BaseAgent):
     def _classify_extended(
         self, query: str, poc_intent: QueryIntent
     ) -> tuple:
-        """Check for enterprise-extended intent types.
+        """Check for enterprise-extended intent types via the intent registry.
 
         Returns (QueryIntent, classification_method).
         §4.2: MUST NOT call LLM for simple classification.
+        New intents can be added via _register_extended_intent() (OCP).
         """
-        # Comparison queries
-        for pattern in _COMPARISON_PATTERNS:
-            if pattern.search(query):
-                entities = self._extract_comparison_entities(query)
-                return QueryIntent(
-                    intent="comparison",
-                    entities=entities,
-                ), "deterministic"
-
-        # Multi-hop queries
-        for pattern in _MULTI_HOP_PATTERNS:
-            if pattern.search(query):
-                return QueryIntent(
-                    intent="multi_hop",
-                ), "deterministic"
-
-        # Aggregation queries
-        for pattern in _AGGREGATION_PATTERNS:
-            if pattern.search(query):
-                return QueryIntent(
-                    intent="aggregation",
-                    coverage_type="numeric_list",
-                ), "deterministic"
-
-        # Metadata queries
-        for pattern in _METADATA_PATTERNS:
-            if pattern.search(query):
-                return QueryIntent(
-                    intent="metadata",
-                ), "deterministic"
+        for patterns, intent_factory in _EXTENDED_INTENT_REGISTRY:
+            if any(p.search(query) for p in patterns):
+                return intent_factory(query), "deterministic"
 
         # Fall back to PoC intent
         return poc_intent, "deterministic"
-
-    def _extract_comparison_entities(self, query: str) -> List[str]:
-        """Extract entities being compared from the query."""
-        # Simple heuristic: split on comparison keywords
-        parts = re.split(r"\bvs\.?\b|\bversus\b|\band\b|\bwith\b", query, flags=re.IGNORECASE)
-        return [p.strip() for p in parts if len(p.strip()) > 3]
 
     def _build_plan(
         self,

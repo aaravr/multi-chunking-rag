@@ -20,7 +20,7 @@ import json
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import asdict
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 logger = logging.getLogger(__name__)
 
@@ -73,8 +73,8 @@ class WorkingMemoryStore(ABC):
     # ── Execution trace (append-only list) ──────────────────────────
 
     @abstractmethod
-    def append_trace(self, query_id: str, step: Dict[str, Any]) -> None:
-        """Append an ExecutionStep dict to the trace."""
+    def append_trace(self, query_id: str, step: Union[Dict[str, Any], List[Dict[str, Any]]]) -> None:
+        """Append one or more ExecutionStep dicts to the trace."""
 
     @abstractmethod
     def get_trace(self, query_id: str) -> List[Dict[str, Any]]:
@@ -147,10 +147,9 @@ class DictBackend(WorkingMemoryStore):
 
     # ── Trace ───────────────────────────────────────────────────────
 
-    def append_trace(self, query_id: str, step: Dict[str, Any]) -> None:
-        self._traces.setdefault(query_id, []).extend(
-            step if isinstance(step, list) else [step]
-        )
+    def append_trace(self, query_id: str, step: Union[Dict[str, Any], List[Dict[str, Any]]]) -> None:
+        steps = step if isinstance(step, list) else [step]
+        self._traces.setdefault(query_id, []).extend(steps)
 
     def get_trace(self, query_id: str) -> List[Dict[str, Any]]:
         return self._traces.get(query_id, [])
@@ -273,7 +272,7 @@ class RedisBackend(WorkingMemoryStore):
 
     # ── Trace ───────────────────────────────────────────────────────
 
-    def append_trace(self, query_id: str, step: Dict[str, Any]) -> None:
+    def append_trace(self, query_id: str, step: Union[Dict[str, Any], List[Dict[str, Any]]]) -> None:
         key = _redis_key(query_id, "trace")
         steps = step if isinstance(step, list) else [step]
         pipe = self._client.pipeline()
