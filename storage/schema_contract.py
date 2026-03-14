@@ -113,12 +113,19 @@ REQUIRED_SCHEMA: Dict[str, List[str]] = {
         "boundary_client",
         "trigger_type",
         "status",
+        "candidate_id",
     ],
     "model_candidates": [
         "candidate_id",
         "layer",
         "boundary_client",
         "stage",
+    ],
+    "evaluation_reports": [
+        "report_id",
+        "candidate_id",
+        "layer",
+        "boundary_client",
     ],
     # ── Training Row Tables (migration 009) ──────────────────────────
     "training_rows_planner": [
@@ -222,6 +229,68 @@ REQUIRED_INDEXES: Dict[str, List[frozenset]] = {
         frozenset({"status"}),
     ],
 }
+
+
+def validate_contract_definitions() -> None:
+    """Validate internal consistency of contract definitions (no DB needed).
+
+    Catches typos and drift in the contract declarations themselves:
+    1. FK child tables must exist in REQUIRED_SCHEMA
+    2. FK parent tables must exist in REQUIRED_SCHEMA
+    3. FK child columns must exist in the child table's REQUIRED_SCHEMA entry
+    4. Index tables must exist in REQUIRED_SCHEMA
+    5. Unique constraint tables must exist in REQUIRED_SCHEMA
+    6. Unique constraint columns must exist in the table's REQUIRED_SCHEMA entry
+
+    This can be called in unit tests without a running database.
+    """
+    errors: List[str] = []
+    all_tables = set(REQUIRED_SCHEMA.keys())
+
+    # FK child and parent tables must exist in schema
+    for child_table, fk_defs in REQUIRED_FOREIGN_KEYS.items():
+        if child_table not in all_tables:
+            errors.append(
+                f"FK child table '{child_table}' not in REQUIRED_SCHEMA"
+            )
+        for child_cols, parent_table, parent_cols in fk_defs:
+            if parent_table not in all_tables:
+                errors.append(
+                    f"FK parent table '{parent_table}' (referenced by "
+                    f"'{child_table}') not in REQUIRED_SCHEMA"
+                )
+            # FK child columns must exist in schema
+            child_schema_cols = set(REQUIRED_SCHEMA.get(child_table, []))
+            for col in child_cols:
+                if col not in child_schema_cols:
+                    errors.append(
+                        f"FK column '{child_table}.{col}' not in REQUIRED_SCHEMA"
+                    )
+
+    # Index tables must exist in schema
+    for table in REQUIRED_INDEXES:
+        if table not in all_tables:
+            errors.append(f"Index table '{table}' not in REQUIRED_SCHEMA")
+
+    # Unique constraint tables and columns must exist in schema
+    for table, constraint_sets in REQUIRED_UNIQUE_CONSTRAINTS.items():
+        if table not in all_tables:
+            errors.append(
+                f"Unique constraint table '{table}' not in REQUIRED_SCHEMA"
+            )
+        table_cols = set(REQUIRED_SCHEMA.get(table, []))
+        for col_set in constraint_sets:
+            for col in col_set:
+                if col not in table_cols:
+                    errors.append(
+                        f"Unique constraint column '{table}.{col}' "
+                        "not in REQUIRED_SCHEMA"
+                    )
+
+    if errors:
+        raise RuntimeError(
+            f"Schema contract definition errors: {'; '.join(errors)}"
+        )
 
 
 def check_schema_contract() -> None:

@@ -40,20 +40,21 @@ This document provides a single-glance view of every major subsystem's implement
 | **Parser Abstraction** | Production-ready | `test_parser_abstraction` | PyMUPDF, Docling, multi-format |
 | **Azure OpenAI** | Production-ready | `test_azure_openai` | Dual-provider support |
 | **Multi-Format Ingestion** | Production-ready | — | DOCX, Excel, CSV, JSON, HTML |
-| **Schema Contract** | Production-ready | `test_schema_contract` (integration) | Columns + unique + FK + indexes |
+| **Schema Contract** | Production-ready | `test_schema_contract` (integration), `test_feedback_loop` (offline) | Columns + unique + FK + indexes + offline self-consistency |
 | **DB Migrations** | Production-ready | `test_migrations_and_contract` (integration) | 9 migrations (001–009) |
 
 ## Feedback / Retraining
 
 | Component | Status | Tests | Notes |
 |-----------|--------|-------|-------|
-| **feedback_loop/ pipeline** | Production-backed (explicit wiring) | `test_feedback_loop` (45 tests) | Use `create_production()` or `create_test()` |
+| **feedback_loop/ pipeline** | Production-backed (explicit wiring) | `test_feedback_loop` (58+ tests) | Use `create_production()` or `create_test()`; partial wiring rejected |
 | **Attribution Engine** | Production-ready | `test_feedback_loop` | 6-rule deterministic |
 | **Training Row Builders** | Production-ready | `test_feedback_loop` | 5 layer-specific builders |
-| **Boundary Policy Guard** | Production-ready | `test_feedback_loop` | Strict: requires full granularity or policy approval |
+| **Boundary Policy Guard** | Production-ready | `test_feedback_loop` | Sole gate at pipeline step 6; strict granularity enforcement |
 | **InMemory Services** | In-memory / test utility | `test_feedback_loop` | Ingestion, trace join, orchestration |
-| **Postgres Services** | Production-backed (explicit wiring) | — (integration) | DB-backed ingestion, trace join, orchestration |
-| **Pipeline Factories** | Production-ready | — | `create_production(get_conn)`, `create_test()` |
+| **Postgres Ingestion + Trace Join** | Production-backed (explicit wiring) | — (integration) | DB-backed; requires `get_conn` factory |
+| **Postgres Retraining Orchestrator** | Production-backed (explicit wiring) | — (integration) | Persists training rows to layer-specific tables + job metadata |
+| **Pipeline Factories** | Production-ready | `test_feedback_loop` | `create_production(get_conn)`, `create_test()`; partial wiring blocked |
 | **Model Evaluator** | In-memory / test utility | `test_feedback_loop` | Placeholder metrics; needs real model runner |
 | **Model Promotion** | In-memory / test utility | `test_feedback_loop` | State machine lifecycle; DB promotion planned |
 | **agents/feedback_agent** | Deprecated | `test_feedback_and_retraining` (legacy) | Removal: Phase 8 |
@@ -95,18 +96,18 @@ This document provides a single-glance view of every major subsystem's implement
 
 | Marker | Count (approx) | Description |
 |--------|---------------|-------------|
-| `unit` | ~275 | No external dependencies; auto-applied by conftest.py |
+| `unit` | ~292 | No external dependencies; auto-applied by conftest.py |
 | `integration` | ~5 | Require PostgreSQL via TEST_DATABASE_URL |
 | `external` | ~2 | Require external PDF files or services |
-| `legacy` | ~32 | Deprecated module tests; auto-tagged by conftest.py |
+| `legacy` | ~32 | Deprecated module tests; auto-tagged by conftest.py; skipped by default (`addopts`) |
 | `slow` | 0 | Reserved for tests >5s |
 
 Run commands:
 ```bash
-pytest tests/ -v -m unit                   # unit tests only (CI default)
+pytest tests/ -v                           # all non-legacy tests (default via addopts)
+pytest tests/ -v -m unit                   # unit tests only
 pytest tests/ -v -m integration            # DB tests only
 pytest tests/ -v -m "not external"         # skip external-dependency tests
-pytest tests/ -v -m "not legacy"           # skip deprecated module tests
 pytest tests/ -v -m legacy                 # deprecated module tests only
-pytest tests/ -v                           # all tests
+pytest tests/ -v -m ""                     # all tests including legacy
 ```

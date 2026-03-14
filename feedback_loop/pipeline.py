@@ -105,33 +105,33 @@ class FeedbackLoopPipeline:
         boundary_guard: Optional[BoundaryPolicyGuard] = None,
         orchestrator: Any = _UNSET,
     ) -> None:
-        # Require at least ingestion, trace_join, or orchestrator to be
-        # explicitly provided.  If all three are _UNSET the caller used
-        # bare FeedbackLoopPipeline() which silently defaults to in-memory.
-        if ingestion is _UNSET and trace_join is _UNSET and orchestrator is _UNSET:
+        # The three core stateful services (ingestion, trace_join, orchestrator)
+        # MUST be provided together.  Partial wiring silently mixes production
+        # and in-memory services, causing training data loss on restart.
+        _core = [ingestion, trace_join, orchestrator]
+        _provided = [s for s in _core if s is not _UNSET]
+        if len(_provided) == 0:
             raise TypeError(
                 "FeedbackLoopPipeline() requires explicit service wiring. "
                 "Use FeedbackLoopPipeline.create_test() for in-memory services, "
                 "FeedbackLoopPipeline.create_production(get_conn) for DB-backed, "
-                "or provide services explicitly via constructor arguments."
+                "or provide all core services explicitly via constructor arguments."
+            )
+        if len(_provided) < 3:
+            raise TypeError(
+                f"Partial service wiring detected ({len(_provided)}/3 core services "
+                "provided). Either provide all of (ingestion, trace_join, orchestrator) "
+                "or use a factory method. Mixing production and in-memory services "
+                "is not allowed."
             )
 
-        self.ingestion: FeedbackIngestionService = (
-            ingestion if ingestion is not _UNSET and ingestion is not None
-            else InMemoryFeedbackIngestionService()
-        )
-        self.trace_join: TraceJoinService = (
-            trace_join if trace_join is not _UNSET and trace_join is not None
-            else InMemoryTraceJoinService()
-        )
+        self.ingestion: FeedbackIngestionService = ingestion
+        self.trace_join: TraceJoinService = trace_join
         self.normalizer = normalizer or DefaultFeedbackNormalizer()
         self.attribution = attribution or RuleBasedAttributionEngine()
         self.row_builder = row_builder or DefaultTrainingRowBuilder()
         self.boundary_guard = boundary_guard or DefaultBoundaryPolicyGuard()
-        self.orchestrator: RetrainingOrchestrator = (
-            orchestrator if orchestrator is not _UNSET and orchestrator is not None
-            else InMemoryRetrainingOrchestrator(boundary_guard=self.boundary_guard)
-        )
+        self.orchestrator: RetrainingOrchestrator = orchestrator
 
     def process(self, event: FeedbackEvent) -> PipelineResult:
         """Process a single feedback event through the full pipeline."""

@@ -61,23 +61,9 @@ dev = [
     "pytest",
     "pytest-cov",
 ]
-# Flattened union of all optional groups (no self-reference)
+# Self-referencing union of all optional groups
 all = [
-    "azure-ai-documentintelligence",
-    "python-docx",
-    "openpyxl",
-    "beautifulsoup4",
-    "docling",
-    "fastapi",
-    "uvicorn",
-    "kafka-python",
-    "redis",
-    "opentelemetry-api",
-    "opentelemetry-sdk",
-    "opentelemetry-exporter-otlp-proto-grpc",
-    "neo4j>=5.0.0",
-    "pytest",
-    "pytest-cov",
+    "multi-chunking-rag[azure,multi-format,docling,feedback-api,kafka,observability,graph,dev]",
 ]
 
 [tool.setuptools.packages.find]
@@ -96,6 +82,7 @@ include = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not legacy'"
 markers = [
     "unit: Unit tests with no external dependencies (DB, LLM, network)",
     "integration: Integration tests requiring PostgreSQL (TEST_DATABASE_URL)",
@@ -103,13 +90,14 @@ markers = [
     "slow: Tests that take >5 seconds to run",
     "legacy: Tests for deprecated modules retained for backward compatibility",
 ]
-# Default: run only unit tests unless explicitly requested
+# Default: skip legacy tests unless explicitly requested (enforced by addopts)
 # Usage:
-#   pytest tests/ -v -m unit               # unit tests only (CI default)
+#   pytest tests/ -v                       # all non-legacy tests (default)
+#   pytest tests/ -v -m unit               # unit tests only
 #   pytest tests/ -v -m integration        # DB tests only
 #   pytest tests/ -v -m "not external"     # skip external-dependency tests
 #   pytest tests/ -v -m legacy             # deprecated module tests only
-#   pytest tests/ -v                       # all tests
+#   pytest tests/ -v -m ""                 # all tests including legacy
 filterwarnings = [
     "ignore::DeprecationWarning:agents.feedback_agent",
     "ignore::DeprecationWarning:agents.retraining_agent",

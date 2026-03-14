@@ -1005,6 +1005,27 @@ class TestPipelineConstruction:
         with pytest.raises(TypeError, match="requires explicit service wiring"):
             FeedbackLoopPipeline()
 
+    def test_partial_wiring_raises(self):
+        """Providing only some core services must raise TypeError."""
+        with pytest.raises(TypeError, match="Partial service wiring"):
+            FeedbackLoopPipeline(ingestion=InMemoryFeedbackIngestionService())
+        with pytest.raises(TypeError, match="Partial service wiring"):
+            FeedbackLoopPipeline(
+                ingestion=InMemoryFeedbackIngestionService(),
+                trace_join=InMemoryTraceJoinService(),
+            )
+
+    def test_full_explicit_wiring_succeeds(self):
+        """Providing all three core services explicitly must succeed."""
+        pipeline = FeedbackLoopPipeline(
+            ingestion=InMemoryFeedbackIngestionService(),
+            trace_join=InMemoryTraceJoinService(),
+            orchestrator=InMemoryRetrainingOrchestrator(),
+        )
+        assert pipeline.ingestion is not None
+        assert pipeline.trace_join is not None
+        assert pipeline.orchestrator is not None
+
     def test_create_test_succeeds(self):
         """create_test() produces a functional pipeline."""
         pipeline = FeedbackLoopPipeline.create_test()
@@ -1070,3 +1091,15 @@ class TestModelEvaluator:
         )
         assert report.candidate_id == candidate.candidate_id
         assert report.baseline_metrics.accuracy == 0.85
+
+
+# ── Schema Contract Offline Validation ──────────────────────────────
+
+
+class TestSchemaContractOffline:
+    """Validates internal consistency of schema contract definitions (no DB needed)."""
+
+    def test_contract_definitions_consistent(self):
+        """All FK references, index tables, and constraint columns must exist in REQUIRED_SCHEMA."""
+        from storage.schema_contract import validate_contract_definitions
+        validate_contract_definitions()  # raises RuntimeError on inconsistency

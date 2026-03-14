@@ -123,10 +123,13 @@ class InMemoryTraceJoinService(TraceJoinService):
 
 
 class InMemoryRetrainingOrchestrator(RetrainingOrchestrator):
-    """In-memory retraining orchestrator.
+    """In-memory retraining orchestrator (test/local-dev only).
 
     Groups rows into datasets per (layer, boundary_key).
     Triggers retraining when row count exceeds min_rows.
+
+    Boundary validation is NOT performed here — the pipeline's Guard step
+    (FeedbackLoopPipeline.process, step 6) is the sole boundary gate.
     """
 
     def __init__(
@@ -136,6 +139,7 @@ class InMemoryRetrainingOrchestrator(RetrainingOrchestrator):
         # (layer, boundary_key_str) → list of rows
         self._datasets: Dict[tuple[str, str], List[Any]] = defaultdict(list)
         self._jobs: Dict[str, Dict[str, Any]] = {}
+        # Retained for interface compatibility but not used for validation
         self._boundary_guard = boundary_guard or DefaultBoundaryPolicyGuard()
 
     def submit_rows(
@@ -144,18 +148,18 @@ class InMemoryRetrainingOrchestrator(RetrainingOrchestrator):
         rows: List[Any],
         boundary_key: BoundaryKey,
     ) -> str:
-        """Submit training rows for a layer.  Returns dataset_id."""
+        """Submit training rows for a layer.  Returns dataset_id.
+
+        Boundary validation is NOT performed here — the pipeline's Guard
+        step (FeedbackLoopPipeline.process, step 6) is the sole boundary
+        gate.  Rows arriving here have already been validated.
+        """
         dataset_key = (layer.value, boundary_key.key)
-        # Validate boundary on each row
-        valid_rows = [
-            r for r in rows
-            if self._boundary_guard.validate_row(r, boundary_key)
-        ]
-        self._datasets[dataset_key].extend(valid_rows)
+        self._datasets[dataset_key].extend(rows)
         dataset_id = f"ds-{layer.value}-{boundary_key.key}-{len(self._datasets[dataset_key])}"
         logger.info(
-            "Submitted %d/%d rows for %s/%s (dataset: %s)",
-            len(valid_rows), len(rows), layer.value, boundary_key.key, dataset_id,
+            "Submitted %d rows for %s/%s (dataset: %s)",
+            len(rows), layer.value, boundary_key.key, dataset_id,
         )
         return dataset_id
 
@@ -588,11 +592,23 @@ class PostgresTraceJoinService(TraceJoinService):
 
 
 class PostgresRetrainingOrchestrator(RetrainingOrchestrator):
-    """DB-backed retraining orchestrator using retraining_jobs table (migration 009).
+    """DB-backed retraining orchestrator using retraining_jobs + training_rows_* tables.
 
-    Delegates row storage to in-memory accumulation (same as InMemory version)
-    but persists retraining job metadata to the database for auditability.
+    Persists both training rows (to layer-specific tables) and retraining job
+    metadata to the database for durability and auditability.
+
+    Boundary validation is NOT performed here — the pipeline's Guard step
+    (FeedbackLoopPipeline.process, step 6) is the sole boundary gate.
     """
+
+    # Maps DecisionLayer to the corresponding training row table name
+    _TABLE_MAP: Dict[DecisionLayer, str] = {
+        DecisionLayer.PLANNING: "training_rows_planner",
+        DecisionLayer.CLASSIFICATION: "training_rows_classifier",
+        DecisionLayer.CHUNKING: "training_rows_chunking",
+        DecisionLayer.EXTRACTION: "training_rows_extraction",
+        DecisionLayer.CALIBRATION: "training_rows_calibration",
+    }
 
     def __init__(
         self,
@@ -600,7 +616,6 @@ class PostgresRetrainingOrchestrator(RetrainingOrchestrator):
         boundary_guard: Optional[BoundaryPolicyGuard] = None,
     ) -> None:
         self._get_conn = get_conn
-        self._datasets: Dict[tuple[str, str], List[Any]] = defaultdict(list)
         self._boundary_guard = boundary_guard or DefaultBoundaryPolicyGuard()
 
     def submit_rows(
@@ -609,18 +624,93 @@ class PostgresRetrainingOrchestrator(RetrainingOrchestrator):
         rows: List[Any],
         boundary_key: BoundaryKey,
     ) -> str:
-        dataset_key = (layer.value, boundary_key.key)
-        valid_rows = [
-            r for r in rows
-            if self._boundary_guard.validate_row(r, boundary_key)
-        ]
-        self._datasets[dataset_key].extend(valid_rows)
-        dataset_id = f"ds-{layer.value}-{boundary_key.key}-{len(self._datasets[dataset_key])}"
+        """Persist training rows to the layer-specific DB table.
+
+        Boundary validation is NOT performed here — the pipeline's Guard
+        step is the sole boundary gate.
+        """
+        table = self._TABLE_MAP.get(layer)
+        if not table:
+            raise ValueError(f"No training row table for layer {layer.value}")
+
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                for row in rows:
+                    self._persist_row(cur, table, layer, row, boundary_key)
+            conn.commit()
+
+        dataset_id = f"ds-{layer.value}-{boundary_key.key}-{_new_id()[:8]}"
         logger.info(
-            "Submitted %d/%d rows for %s/%s (dataset: %s)",
-            len(valid_rows), len(rows), layer.value, boundary_key.key, dataset_id,
+            "Persisted %d rows to %s for %s/%s (dataset: %s)",
+            len(rows), table, layer.value, boundary_key.key, dataset_id,
         )
         return dataset_id
+
+    def _persist_row(
+        self,
+        cur: Any,
+        table: str,
+        layer: DecisionLayer,
+        row: Any,
+        boundary_key: BoundaryKey,
+    ) -> None:
+        """Insert a single training row into its layer-specific table."""
+        row_id = _new_id()
+        source_ids = row.source_feedback_ids if hasattr(row, "source_feedback_ids") else []
+
+        if layer == DecisionLayer.PLANNING:
+            cur.execute(
+                f"""INSERT INTO {table} (
+                    row_id, source_feedback_ids, boundary_client,
+                    boundary_division, boundary_jurisdiction, accuracy
+                ) VALUES (%s, %s, %s, %s, %s, %s)""",
+                (row_id, source_ids, boundary_key.client,
+                 boundary_key.division, boundary_key.jurisdiction,
+                 getattr(row, "accuracy", 0.0)),
+            )
+        elif layer == DecisionLayer.CLASSIFICATION:
+            cur.execute(
+                f"""INSERT INTO {table} (
+                    row_id, source_feedback_ids, boundary_client,
+                    boundary_division, boundary_jurisdiction, is_correct
+                ) VALUES (%s, %s, %s, %s, %s, %s)""",
+                (row_id, source_ids, boundary_key.client,
+                 boundary_key.division, boundary_key.jurisdiction,
+                 getattr(row, "is_correct", False)),
+            )
+        elif layer == DecisionLayer.CHUNKING:
+            cur.execute(
+                f"""INSERT INTO {table} (
+                    row_id, source_feedback_ids, boundary_client,
+                    boundary_division, boundary_jurisdiction, evidence_recall
+                ) VALUES (%s, %s, %s, %s, %s, %s)""",
+                (row_id, source_ids, boundary_key.client,
+                 boundary_key.division, boundary_key.jurisdiction,
+                 getattr(row, "evidence_recall", 0.0)),
+            )
+        elif layer == DecisionLayer.EXTRACTION:
+            cur.execute(
+                f"""INSERT INTO {table} (
+                    row_id, source_feedback_ids, boundary_client,
+                    boundary_division, boundary_jurisdiction,
+                    field_name, is_correct
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                (row_id, source_ids, boundary_key.client,
+                 boundary_key.division, boundary_key.jurisdiction,
+                 getattr(row, "field_name", ""), getattr(row, "is_correct", False)),
+            )
+        elif layer == DecisionLayer.CALIBRATION:
+            cur.execute(
+                f"""INSERT INTO {table} (
+                    row_id, source_feedback_ids, boundary_client,
+                    boundary_division, boundary_jurisdiction,
+                    is_correct, confidence_bucket
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                (row_id, source_ids, boundary_key.client,
+                 boundary_key.division, boundary_key.jurisdiction,
+                 getattr(row, "is_correct", False),
+                 getattr(row, "confidence_bucket", "0.0-0.1")),
+            )
 
     def trigger_retraining(
         self,
@@ -629,12 +719,23 @@ class PostgresRetrainingOrchestrator(RetrainingOrchestrator):
         trigger: RetrainingTrigger = RetrainingTrigger.THRESHOLD,
         min_rows: int = 10,
     ) -> Optional[str]:
-        dataset_key = (layer.value, boundary_key.key)
-        rows = self._datasets.get(dataset_key, [])
-        if len(rows) < min_rows:
+        table = self._TABLE_MAP.get(layer)
+        if not table:
+            return None
+
+        # Count rows from DB, not in-memory
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE boundary_client = %s",
+                    (boundary_key.client,),
+                )
+                row_count = cur.fetchone()[0]
+
+        if row_count < min_rows:
             logger.info(
                 "Insufficient data for %s/%s: %d < %d",
-                layer.value, boundary_key.key, len(rows), min_rows,
+                layer.value, boundary_key.key, row_count, min_rows,
             )
             return None
 
@@ -652,13 +753,13 @@ class PostgresRetrainingOrchestrator(RetrainingOrchestrator):
                         job_id, layer.value,
                         boundary_key.client, boundary_key.division,
                         boundary_key.jurisdiction,
-                        trigger.value, len(rows),
+                        trigger.value, row_count,
                     ),
                 )
             conn.commit()
         logger.info(
             "Persisted retraining job %s for %s/%s (%d rows)",
-            job_id, layer.value, boundary_key.key, len(rows),
+            job_id, layer.value, boundary_key.key, row_count,
         )
         return job_id
 
@@ -681,4 +782,14 @@ class PostgresRetrainingOrchestrator(RetrainingOrchestrator):
                 }
 
     def get_dataset_size(self, layer: DecisionLayer, boundary_key: BoundaryKey) -> int:
-        return len(self._datasets.get((layer.value, boundary_key.key), []))
+        """Count persisted training rows from DB."""
+        table = self._TABLE_MAP.get(layer)
+        if not table:
+            return 0
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE boundary_client = %s",
+                    (boundary_key.client,),
+                )
+                return cur.fetchone()[0]
