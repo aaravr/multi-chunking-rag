@@ -93,6 +93,9 @@ class DefaultBoundaryPolicyGuard(BoundaryPolicyGuard):
         A row is valid if:
         1. It has a boundary_key attribute
         2. The boundary_key matches the expected boundary
+
+        Emits warnings for partial boundary keys (empty division/jurisdiction)
+        to surface potential isolation gaps during development.
         """
         if not hasattr(row, "boundary_key"):
             logger.warning("Training row missing boundary_key: %s", type(row).__name__)
@@ -102,6 +105,18 @@ class DefaultBoundaryPolicyGuard(BoundaryPolicyGuard):
         if not isinstance(row_boundary, BoundaryKey):
             logger.warning("Training row boundary_key is not a BoundaryKey: %s", type(row_boundary))
             return False
+
+        # Warn on partial boundary keys — isolation may be weaker than intended
+        if not row_boundary.division:
+            logger.warning(
+                "BoundaryKey has empty division for client=%s — training isolation is client-level only",
+                row_boundary.client,
+            )
+        if not row_boundary.jurisdiction:
+            logger.warning(
+                "BoundaryKey has empty jurisdiction for client=%s — no jurisdictional isolation",
+                row_boundary.client,
+            )
 
         if row_boundary.key != expected_boundary.key:
             logger.warning(

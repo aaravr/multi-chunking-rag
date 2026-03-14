@@ -293,13 +293,13 @@ These are Phase 7+ concerns. For now:
 
 ### P2 — Fix When Capacity Allows
 
-| # | Action | Files | Impact |
-|---|--------|-------|--------|
-| P2.1 | Implement DB-backed feedback services replacing InMemory* | `feedback_loop/services.py` | Production persistence |
-| P2.2 | Define canonical DocumentLifecycle and QueryState enums | `core/contracts.py` | Formal state model |
-| P2.3 | Add pytest markers (unit/integration/external) and pyproject.toml config | `pyproject.toml`, test files | Reproducible test execution |
-| P2.4 | Migrate audit.py to use repo.py abstraction | `agents/audit.py`, `storage/repo.py` | Separation of concerns |
-| P2.5 | Add enterprise table validation to schema_contract.py | `storage/schema_contract.py` | Complete contract coverage |
+| # | Action | Files | Impact | Status |
+|---|--------|-------|--------|--------|
+| P2.1 | Implement DB-backed feedback services replacing InMemory* | `feedback_loop/services.py` | Production persistence | **DONE** |
+| P2.2 | Define canonical DocumentLifecycle and QueryState enums | `core/contracts.py` | Formal state model | **DONE** |
+| P2.3 | Add pytest markers (unit/integration/external) and pyproject.toml config | `pyproject.toml`, test files | Reproducible test execution | **DONE** |
+| P2.4 | Migrate audit.py to use repo.py abstraction | `agents/audit.py`, `storage/repo.py` | Separation of concerns | **DONE** |
+| P2.5 | Add enterprise table validation to schema_contract.py | `storage/schema_contract.py` | Complete contract coverage | **DONE** |
 
 ---
 
@@ -341,14 +341,14 @@ Deprecated: agents.contracts.FeedbackEntry/FeedbackResult (use feedback_loop.mod
 
 ### 8.3 Persistence Expectations
 
-| Layer | Current | Target |
-|-------|---------|--------|
-| Feedback ingestion | InMemory | DB-backed (migration 009 tables) |
-| Trace join | InMemory | DB-backed (prediction_traces table) |
-| Training row accumulation | InMemory | DB-backed (training_rows_* tables) |
-| Retraining orchestration | InMemory | DB-backed (retraining_jobs table) |
-| Model promotion | InMemory | DB-backed (model_candidates + evaluation_reports) |
-| Boundary approvals | In-memory set | DB-backed (boundary_sharing_approvals table) |
+| Layer | InMemory (tests) | DB-backed (production) | Status |
+|-------|-----------------|----------------------|--------|
+| Feedback ingestion | `InMemoryFeedbackIngestionService` | `PostgresFeedbackIngestionService` | **DONE** |
+| Trace join | `InMemoryTraceJoinService` | `PostgresTraceJoinService` | **DONE** |
+| Retraining orchestration | `InMemoryRetrainingOrchestrator` | `PostgresRetrainingOrchestrator` | **DONE** |
+| Training row accumulation | In-memory (within orchestrator) | In-memory + DB job metadata | **Partial** |
+| Model promotion | `InMemoryModelPromotionController` | In-memory (DB promotion planned) | **Planned** |
+| Boundary approvals | In-memory set | In-memory (DB approvals planned) | **Planned** |
 
 ---
 

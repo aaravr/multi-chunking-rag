@@ -275,6 +275,57 @@ Config ENABLE_MULTI_FORMAT	§10.5	core/config.py	Manual toggle	Complete
 
 ⸻
 
+20. Feedback Loop Subsystem — Canonical Feedback/Retraining Architecture
+
+Requirement	Spec Ref	Impl	Tests	Status
+Typed feedback domain models (Pydantic v2)	§4.10	feedback_loop/models.py (25 models, 6 enums)	tests/test_feedback_loop.py::TestBoundaryKey	Complete
+BoundaryKey isolation: B = (client, division, jurisdiction)	§4.10	feedback_loop/models.py (BoundaryKey, min_length=1)	tests/test_feedback_loop.py::TestBoundaryPolicyGuard	Complete
+Feedback ingestion with boundary validation	§4.10	feedback_loop/services.py (InMemory + Postgres)	tests/test_feedback_loop.py::TestEndToEndPipeline	Complete
+Prediction trace join service	§4.10	feedback_loop/services.py (InMemory + Postgres)	tests/test_feedback_loop.py::TestEndToEndPipeline	Complete
+6-rule deterministic attribution engine	§4.10	feedback_loop/attribution.py (RuleBasedAttributionEngine)	tests/test_feedback_loop.py::TestRule1-6	Complete
+Feedback normalization (comment → reason codes)	§4.10	feedback_loop/normalizer.py (DefaultFeedbackNormalizer)	tests/test_feedback_loop.py::TestNormalizer	Complete
+Layer-specific training row builders (5 layers)	§4.10	feedback_loop/training_rows.py (DefaultTrainingRowBuilder)	tests/test_feedback_loop.py::TestTrainingRowBuilder	Complete
+Boundary policy guard with sanitization	§4.10	feedback_loop/boundary.py (DefaultBoundaryPolicyGuard)	tests/test_feedback_loop.py::TestBoundaryPolicyGuard	Complete
+End-to-end pipeline orchestration	§4.10	feedback_loop/pipeline.py (FeedbackLoopPipeline)	tests/test_feedback_loop.py::TestEndToEndPipeline	Complete
+Quarantine semantics for missing traces	§4.10	feedback_loop/pipeline.py (quarantined=True)	tests/test_feedback_loop.py::test_pipeline_no_trace_quarantine	Complete
+Model lifecycle management (shadow→canary→approved)	§4.10	feedback_loop/services.py (InMemoryModelPromotionController)	tests/test_feedback_loop.py::TestModelPromotion	Complete
+Model evaluation with baseline comparison	§4.10	feedback_loop/services.py (DefaultModelEvaluator)	tests/test_feedback_loop.py::TestModelEvaluator	Complete
+Abstract service interfaces (pluggable backends)	§4.10	feedback_loop/interfaces.py (9 ABCs)	tests/test_feedback_loop.py	Complete
+DB-backed feedback services (Postgres)	§4.10	feedback_loop/services.py (Postgres*)	Integration test (requires DB)	Complete
+DB migration for feedback loop tables	§4.10	storage/migrations/009_feedback_loop_subsystem.sql (14 tables)	Schema test (requires DB)	Complete
+Deprecation of agents/feedback_agent.py	§4.10	agents/feedback_agent.py (DeprecationWarning)	Import warning test	Complete
+Deprecation of agents/retraining_agent.py	§4.11	agents/retraining_agent.py (DeprecationWarning)	Import warning test	Complete
+
+⸻
+
+21. Enterprise State Model
+
+Requirement	Spec Ref	Impl	Tests	Status
+DocumentLifecycle enum	§4	core/contracts.py (10 states)	Code review	Complete
+QueryState enum	§4	core/contracts.py (7 states)	Code review	Complete
+FeedbackState enum	§4.10	core/contracts.py (6 states)	Code review	Complete
+
+⸻
+
+22. Schema Contract Validation — Enterprise Coverage
+
+Requirement	Spec Ref	Impl	Tests	Status
+Core table validation (documents, pages, chunks, document_facts)	§7	storage/schema_contract.py	tests/test_migrations_and_contract.py	Complete
+Enterprise field validation (document_type, classification_label, updated_at)	§7	storage/schema_contract.py	Schema test (requires DB)	Complete
+Lineage field validation (heading_path, section_id)	§2.1	storage/schema_contract.py	Schema test (requires DB)	Complete
+Audit log table validation	§2.4	storage/schema_contract.py	Schema test (requires DB)	Complete
+Feedback loop table validation (prediction_traces, feedback_events, etc.)	§4.10	storage/schema_contract.py	Schema test (requires DB)	Complete
+
+⸻
+
+23. Audit Log Repository Abstraction
+
+Requirement	Spec Ref	Impl	Tests	Status
+Audit writes through repo layer (§2.5 SoC)	§2.4, §2.5	storage/repo.py (insert_audit_entry, insert_audit_entries)	Code review	Complete
+audit.py delegates to repo.py	§2.5	agents/audit.py	Code review	Complete
+
+⸻
+
 Usage Rule
 	•	Every PR MUST update this file if it adds, completes, or modifies a requirement.
 	•	A PR that touches code without updating traceability must be rejected.

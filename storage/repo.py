@@ -5,6 +5,9 @@ from pgvector.psycopg2 import register_vector
 
 from core.contracts import ChunkRecord, DocumentFact, DocumentRecord, PageRecord, TriageMetrics
 
+# Lazy import to avoid circular dependency — agents.contracts imports are deferred.
+# See insert_audit_entry / insert_audit_entries below.
+
 
 def insert_document(conn, document: DocumentRecord) -> None:
     with conn.cursor() as cursor:
@@ -395,3 +398,77 @@ def fetch_document_fact(conn, doc_id: str, fact_name: str) -> Optional[DocumentF
         polygons=list(row[7] or []),
         evidence_excerpt=row[8],
     )
+
+
+# ── Audit Log Repository (§2.4) ─────────────────────────────────────
+# These functions consolidate all audit_log writes behind the repo layer,
+# enforcing the same separation of concerns as other tables.
+
+_AUDIT_INSERT_COLS = (
+    "log_id, query_id, agent_id, step_id, event_type, "
+    "model_id, prompt_template_version, full_prompt, full_response, "
+    "input_tokens, output_tokens, temperature, latency_ms, "
+    "cost_estimate, user_id, timestamp"
+)
+
+
+def insert_audit_entry(conn, entry) -> None:
+    """Persist a single AuditLogEntry to the audit_log table.
+
+    §2.4: Audit logs are IMMUTABLE and APPEND-ONLY.
+    """
+    with conn.cursor() as cursor:
+        cursor.execute(
+            f"""
+            INSERT INTO audit_log ({_AUDIT_INSERT_COLS})
+            VALUES (
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s,
+                %s, %s, %s, %s,
+                %s, %s, %s
+            )
+            """,
+            (
+                entry.log_id,
+                entry.query_id or None,
+                entry.agent_id,
+                entry.step_id,
+                entry.event_type,
+                entry.model_id,
+                entry.prompt_template_version,
+                entry.full_prompt,
+                entry.full_response,
+                entry.input_tokens,
+                entry.output_tokens,
+                entry.temperature,
+                entry.latency_ms,
+                entry.cost_estimate,
+                entry.user_id or None,
+                entry.timestamp,
+            ),
+        )
+
+
+def insert_audit_entries(conn, entries: list) -> int:
+    """Persist multiple AuditLogEntry objects in a single batch.
+
+    Returns the number of entries written.
+    """
+    if not entries:
+        return 0
+    rows = [
+        (
+            e.log_id, e.query_id or None, e.agent_id, e.step_id, e.event_type,
+            e.model_id, e.prompt_template_version, e.full_prompt, e.full_response,
+            e.input_tokens, e.output_tokens, e.temperature, e.latency_ms,
+            e.cost_estimate, e.user_id or None, e.timestamp,
+        )
+        for e in entries
+    ]
+    with conn.cursor() as cursor:
+        execute_values(
+            cursor,
+            f"INSERT INTO audit_log ({_AUDIT_INSERT_COLS}) VALUES %s",
+            rows,
+        )
+    return len(rows)

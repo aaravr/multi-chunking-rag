@@ -1,11 +1,15 @@
-"""Concrete service implementations — In-memory for tests, SQL-friendly for production.
+"""Concrete service implementations — In-memory for tests, DB-backed for production.
 
 These implementations provide the core feedback loop pipeline:
     Ingest → Join → Normalize → Attribute → Build → Guard → Orchestrate → Evaluate → Promote
+
+In-memory implementations are suitable for unit tests and local development.
+DB-backed (Postgres*) implementations use migration 009 tables for production persistence.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 import uuid
@@ -328,3 +332,353 @@ class InMemoryModelPromotionController(ModelPromotionController):
         if cid:
             return self._candidates.get(cid)
         return None
+
+
+# ══════════════════════════════════════════════════════════════════════
+# DB-Backed Implementations (migration 009 tables)
+# ══════════════════════════════════════════════════════════════════════
+#
+# These implementations use PostgreSQL for durable persistence.
+# They accept a connection-factory callable that returns a context-managed
+# connection (matching the pattern in storage/db_pool.py).
+# ══════════════════════════════════════════════════════════════════════
+
+
+class PostgresFeedbackIngestionService(FeedbackIngestionService):
+    """DB-backed feedback ingestion service using feedback_events table (migration 009)."""
+
+    def __init__(self, get_conn: Callable) -> None:
+        self._get_conn = get_conn
+
+    def ingest(self, event: FeedbackEvent) -> str:
+        feedback_id = event.feedback_id or _new_id()
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO feedback_events (
+                        feedback_id, trace_id, query_id, doc_id, user_id,
+                        boundary_client, boundary_division, boundary_jurisdiction,
+                        rating, comment, correct_answer,
+                        correct_document_type, correct_classification_label,
+                        correct_evidence_spans, correct_field_values,
+                        processing_path_override, channel, cited_chunk_ids
+                    ) VALUES (
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s,
+                        %s, %s, %s,
+                        %s, %s,
+                        %s, %s,
+                        %s, %s, %s
+                    )
+                    ON CONFLICT (feedback_id) DO NOTHING
+                    """,
+                    (
+                        feedback_id,
+                        event.trace_id or None,
+                        event.query_id or None,
+                        event.doc_id or None,
+                        event.user_id or None,
+                        event.boundary_key.client,
+                        event.boundary_key.division,
+                        event.boundary_key.jurisdiction,
+                        event.rating.value,
+                        event.comment or None,
+                        event.correct_answer or None,
+                        event.correct_document_type or None,
+                        event.correct_classification_label or None,
+                        event.correct_evidence_spans or None,
+                        json.dumps(event.correct_field_values) if event.correct_field_values else None,
+                        event.processing_path_override or None,
+                        event.channel.value if event.channel else "api",
+                        event.cited_chunk_ids or None,
+                    ),
+                )
+            conn.commit()
+        logger.info("Persisted feedback %s (rating=%s)", feedback_id, event.rating.value)
+        return feedback_id
+
+    def get_event(self, feedback_id: str) -> Optional[FeedbackEvent]:
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT feedback_id, trace_id, query_id, doc_id, user_id,
+                           boundary_client, boundary_division, boundary_jurisdiction,
+                           rating, comment, correct_answer,
+                           correct_document_type, correct_classification_label,
+                           correct_evidence_spans, correct_field_values,
+                           processing_path_override, channel, cited_chunk_ids, created_at
+                    FROM feedback_events WHERE feedback_id = %s
+                    """,
+                    (feedback_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                return self._row_to_event(row)
+
+    def list_events(
+        self,
+        boundary_key: Optional[BoundaryKey] = None,
+        doc_id: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[FeedbackEvent]:
+        clauses = []
+        params: list = []
+        if boundary_key:
+            clauses.append("boundary_client = %s AND boundary_division = %s AND boundary_jurisdiction = %s")
+            params.extend([boundary_key.client, boundary_key.division, boundary_key.jurisdiction])
+        if doc_id:
+            clauses.append("doc_id = %s")
+            params.append(doc_id)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(limit)
+
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT feedback_id, trace_id, query_id, doc_id, user_id,
+                           boundary_client, boundary_division, boundary_jurisdiction,
+                           rating, comment, correct_answer,
+                           correct_document_type, correct_classification_label,
+                           correct_evidence_spans, correct_field_values,
+                           processing_path_override, channel, cited_chunk_ids, created_at
+                    FROM feedback_events{where}
+                    ORDER BY created_at DESC LIMIT %s
+                    """,
+                    params,
+                )
+                return [self._row_to_event(r) for r in cur.fetchall()]
+
+    @staticmethod
+    def _row_to_event(row: tuple) -> FeedbackEvent:
+        return FeedbackEvent(
+            feedback_id=str(row[0]),
+            trace_id=str(row[1]) if row[1] else "",
+            query_id=row[2] or "",
+            doc_id=str(row[3]) if row[3] else "",
+            user_id=row[4] or "",
+            boundary_key=BoundaryKey(client=row[5], division=row[6], jurisdiction=row[7]),
+            rating=FeedbackRating(row[8]),
+            comment=row[9] or "",
+            correct_answer=row[10] or "",
+            correct_document_type=row[11] or "",
+            correct_classification_label=row[12] or "",
+            correct_evidence_spans=row[13] or [],
+            correct_field_values=row[14] or {},
+            processing_path_override=row[15] or "",
+            cited_chunk_ids=row[17] or [],
+        )
+
+
+class PostgresTraceJoinService(TraceJoinService):
+    """DB-backed trace join service using prediction_traces table (migration 009)."""
+
+    def __init__(self, get_conn: Callable) -> None:
+        self._get_conn = get_conn
+
+    def store_trace(self, trace: PredictionTrace) -> str:
+        trace_id = trace.trace_id or _new_id()
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO prediction_traces (
+                        trace_id, query_id, doc_id, user_id,
+                        boundary_client, boundary_division, boundary_jurisdiction,
+                        planner_decision, classifier_decision,
+                        chunking_decision, extraction_decision, transformation_decision,
+                        final_answer, final_confidence, citations,
+                        model_versions, total_latency_ms
+                    ) VALUES (
+                        %s, %s, %s, %s,
+                        %s, %s, %s,
+                        %s, %s,
+                        %s, %s, %s,
+                        %s, %s, %s,
+                        %s, %s
+                    )
+                    ON CONFLICT (trace_id) DO NOTHING
+                    """,
+                    (
+                        trace_id,
+                        trace.query_id or None,
+                        trace.doc_id or None,
+                        trace.user_id or None,
+                        trace.boundary_key.client if trace.boundary_key else "",
+                        trace.boundary_key.division if trace.boundary_key else "",
+                        trace.boundary_key.jurisdiction if trace.boundary_key else "",
+                        json.dumps(trace.planner_decision.model_dump() if trace.planner_decision else {}),
+                        json.dumps(trace.classifier_decision.model_dump() if trace.classifier_decision else {}),
+                        json.dumps(trace.chunking_decision.model_dump() if trace.chunking_decision else {}),
+                        json.dumps(trace.extraction_decision.model_dump() if trace.extraction_decision else {}),
+                        json.dumps(trace.transformation_decision.model_dump() if trace.transformation_decision else {}),
+                        trace.final_answer or None,
+                        trace.final_confidence,
+                        trace.citations or None,
+                        json.dumps(trace.model_versions or {}),
+                        trace.total_latency_ms,
+                    ),
+                )
+            conn.commit()
+        return trace_id
+
+    def get_trace(self, trace_id: str) -> Optional[PredictionTrace]:
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT trace_id, query_id, doc_id, user_id,
+                           boundary_client, boundary_division, boundary_jurisdiction,
+                           final_answer, final_confidence, citations,
+                           model_versions, total_latency_ms
+                    FROM prediction_traces WHERE trace_id = %s
+                    """,
+                    (trace_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                return self._row_to_trace(row)
+
+    def get_trace_by_query(self, query_id: str) -> Optional[PredictionTrace]:
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT trace_id, query_id, doc_id, user_id,
+                           boundary_client, boundary_division, boundary_jurisdiction,
+                           final_answer, final_confidence, citations,
+                           model_versions, total_latency_ms
+                    FROM prediction_traces WHERE query_id = %s
+                    ORDER BY created_at DESC LIMIT 1
+                    """,
+                    (query_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                return self._row_to_trace(row)
+
+    def join(self, event: FeedbackEvent) -> Optional[PredictionTrace]:
+        if event.trace_id:
+            trace = self.get_trace(event.trace_id)
+            if trace:
+                return trace
+        if event.query_id:
+            return self.get_trace_by_query(event.query_id)
+        return None
+
+    @staticmethod
+    def _row_to_trace(row: tuple) -> PredictionTrace:
+        return PredictionTrace(
+            trace_id=str(row[0]),
+            query_id=row[1] or "",
+            doc_id=str(row[2]) if row[2] else "",
+            user_id=row[3] or "",
+            boundary_key=BoundaryKey(client=row[4], division=row[5], jurisdiction=row[6]),
+            final_answer=row[7] or "",
+            final_confidence=row[8] or 0.0,
+            citations=row[9] or [],
+            model_versions=row[10] or {},
+            total_latency_ms=row[11] or 0.0,
+        )
+
+
+class PostgresRetrainingOrchestrator(RetrainingOrchestrator):
+    """DB-backed retraining orchestrator using retraining_jobs table (migration 009).
+
+    Delegates row storage to in-memory accumulation (same as InMemory version)
+    but persists retraining job metadata to the database for auditability.
+    """
+
+    def __init__(
+        self,
+        get_conn: Callable,
+        boundary_guard: Optional[BoundaryPolicyGuard] = None,
+    ) -> None:
+        self._get_conn = get_conn
+        self._datasets: Dict[tuple[str, str], List[Any]] = defaultdict(list)
+        self._boundary_guard = boundary_guard or DefaultBoundaryPolicyGuard()
+
+    def submit_rows(
+        self,
+        layer: DecisionLayer,
+        rows: List[Any],
+        boundary_key: BoundaryKey,
+    ) -> str:
+        dataset_key = (layer.value, boundary_key.key)
+        valid_rows = [
+            r for r in rows
+            if self._boundary_guard.validate_row(r, boundary_key)
+        ]
+        self._datasets[dataset_key].extend(valid_rows)
+        dataset_id = f"ds-{layer.value}-{boundary_key.key}-{len(self._datasets[dataset_key])}"
+        logger.info(
+            "Submitted %d/%d rows for %s/%s (dataset: %s)",
+            len(valid_rows), len(rows), layer.value, boundary_key.key, dataset_id,
+        )
+        return dataset_id
+
+    def trigger_retraining(
+        self,
+        layer: DecisionLayer,
+        boundary_key: BoundaryKey,
+        trigger: RetrainingTrigger = RetrainingTrigger.THRESHOLD,
+        min_rows: int = 10,
+    ) -> Optional[str]:
+        dataset_key = (layer.value, boundary_key.key)
+        rows = self._datasets.get(dataset_key, [])
+        if len(rows) < min_rows:
+            logger.info(
+                "Insufficient data for %s/%s: %d < %d",
+                layer.value, boundary_key.key, len(rows), min_rows,
+            )
+            return None
+
+        job_id = _new_id()
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO retraining_jobs (
+                        job_id, layer, boundary_client, boundary_division,
+                        boundary_jurisdiction, trigger_type, row_count, status
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending')
+                    """,
+                    (
+                        job_id, layer.value,
+                        boundary_key.client, boundary_key.division,
+                        boundary_key.jurisdiction,
+                        trigger.value, len(rows),
+                    ),
+                )
+            conn.commit()
+        logger.info(
+            "Persisted retraining job %s for %s/%s (%d rows)",
+            job_id, layer.value, boundary_key.key, len(rows),
+        )
+        return job_id
+
+    def get_job_status(self, job_id: str) -> Dict[str, Any]:
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT job_id, layer, status, row_count, created_at FROM retraining_jobs WHERE job_id = %s",
+                    (job_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return {"status": "not_found"}
+                return {
+                    "job_id": str(row[0]),
+                    "layer": row[1],
+                    "status": row[2],
+                    "row_count": row[3],
+                    "created_at": row[4].isoformat() if row[4] else None,
+                }
+
+    def get_dataset_size(self, layer: DecisionLayer, boundary_key: BoundaryKey) -> int:
+        return len(self._datasets.get((layer.value, boundary_key.key), []))

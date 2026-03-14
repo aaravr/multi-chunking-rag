@@ -51,8 +51,18 @@ from feedback_loop.models import (
     ModelCandidate,
     EvaluationReport,
 )
+from feedback_loop.pipeline import FeedbackLoopPipeline, PipelineResult
+from feedback_loop.services import (
+    InMemoryFeedbackIngestionService,
+    InMemoryTraceJoinService,
+    InMemoryRetrainingOrchestrator,
+    PostgresFeedbackIngestionService,
+    PostgresTraceJoinService,
+    PostgresRetrainingOrchestrator,
+)
 
 __all__ = [
+    # Domain models
     "BoundaryKey",
     "PredictionTrace",
     "FeedbackEvent",
@@ -65,4 +75,15 @@ __all__ = [
     "CalibrationTrainingRow",
     "ModelCandidate",
     "EvaluationReport",
+    # Pipeline
+    "FeedbackLoopPipeline",
+    "PipelineResult",
+    # In-memory services (tests + local dev)
+    "InMemoryFeedbackIngestionService",
+    "InMemoryTraceJoinService",
+    "InMemoryRetrainingOrchestrator",
+    # DB-backed services (production)
+    "PostgresFeedbackIngestionService",
+    "PostgresTraceJoinService",
+    "PostgresRetrainingOrchestrator",
 ]

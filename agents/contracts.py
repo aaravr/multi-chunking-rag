@@ -486,7 +486,13 @@ class ChunkingOutcome:
 
 @dataclass(frozen=True)
 class FeedbackEntry:
-    """User feedback on a query answer — drives learning loop."""
+    """User feedback on a query answer — drives learning loop.
+
+    .. deprecated::
+        Use ``feedback_loop.models.FeedbackEvent`` instead. This type is retained
+        for backward compatibility with ``agents/feedback_agent.py`` (also deprecated).
+        See ``docs/ENGINEERING_REVIEW.md`` Section 4 for migration guidance.
+    """
     feedback_id: str
     query_id: str
     doc_id: str
@@ -499,7 +505,13 @@ class FeedbackEntry:
 
 @dataclass(frozen=True)
 class FeedbackResult:
-    """Output of FeedbackAgent — confirms feedback was routed."""
+    """Output of FeedbackAgent — confirms feedback was routed.
+
+    .. deprecated::
+        Use ``feedback_loop.pipeline.PipelineResult`` instead. This type is retained
+        for backward compatibility with ``agents/feedback_agent.py`` (also deprecated).
+        See ``docs/ENGINEERING_REVIEW.md`` Section 4 for migration guidance.
+    """
     feedback_id: str
     query_id: str
     routed_to: List[str]            # Agents that received the feedback
@@ -508,7 +520,12 @@ class FeedbackResult:
 
 @dataclass(frozen=True)
 class RetrainingRequest:
-    """Input to RetrainingAgent — specifies what to retrain."""
+    """Input to RetrainingAgent — specifies what to retrain.
+
+    .. deprecated::
+        Use ``feedback_loop.models.RetrainingTrigger`` and the ``feedback_loop.interfaces.RetrainingOrchestrator``
+        instead. This type is retained for backward compatibility with ``agents/retraining_agent.py`` (also deprecated).
+    """
     trigger: str                    # "scheduled" | "threshold" | "manual"
     target_components: List[str] = field(default_factory=list)  # "classifier" | "preprocessor" | "all"
     min_feedback_count: int = 10    # Minimum feedback entries to justify retraining

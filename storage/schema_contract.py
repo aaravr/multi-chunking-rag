@@ -3,6 +3,7 @@ from typing import Dict, List
 from storage.db import get_connection
 
 REQUIRED_SCHEMA: Dict[str, List[str]] = {
+    # ── Core PoC Tables ──────────────────────────────────────────────
     "chunks": [
         "chunk_id",
         "doc_id",
@@ -40,9 +41,10 @@ REQUIRED_SCHEMA: Dict[str, List[str]] = {
         "sha256",
         "page_count",
         "created_at",
-        # Enterprise classification fields — added by migration 004
+        # Enterprise fields — added by migration 004
         "document_type",
         "classification_label",
+        "updated_at",
     ],
     "document_facts": [
         "doc_id",
@@ -55,6 +57,55 @@ REQUIRED_SCHEMA: Dict[str, List[str]] = {
         "polygons",
         "evidence_excerpt",
         "created_at",
+    ],
+    # ── Enterprise Tables (migration 004) ────────────────────────────
+    "audit_log": [
+        "log_id",
+        "agent_id",
+        "event_type",
+        "model_id",
+        "full_prompt",
+        "full_response",
+        "input_tokens",
+        "output_tokens",
+        "temperature",
+        "timestamp",
+    ],
+    # ── Feedback Loop Tables (migration 009) — canonical path ────────
+    "prediction_traces": [
+        "trace_id",
+        "query_id",
+        "boundary_client",
+        "boundary_division",
+        "boundary_jurisdiction",
+        "created_at",
+    ],
+    "feedback_events": [
+        "feedback_id",
+        "boundary_client",
+        "boundary_division",
+        "boundary_jurisdiction",
+        "rating",
+        "created_at",
+    ],
+    "feedback_attributions": [
+        "attribution_id",
+        "feedback_id",
+        "impacted_layers",
+        "attribution_method",
+    ],
+    "retraining_jobs": [
+        "job_id",
+        "layer",
+        "boundary_client",
+        "trigger_type",
+        "status",
+    ],
+    "model_candidates": [
+        "candidate_id",
+        "layer",
+        "boundary_client",
+        "stage",
     ],
 }
 

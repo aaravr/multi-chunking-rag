@@ -1,0 +1,18 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "unit: Unit tests with no external dependencies (DB, LLM, network)",
+    "integration: Integration tests requiring PostgreSQL (TEST_DATABASE_URL)",
+    "external: Tests requiring external services (Azure DI, OpenAI API, Kafka)",
+    "slow: Tests that take >5 seconds to run",
+]
+# Default: run only unit tests unless explicitly requested
+# Usage:
+#   pytest tests/ -v                       # all tests
+#   pytest tests/ -v -m unit               # unit tests only
+#   pytest tests/ -v -m integration        # integration tests only
+#   pytest tests/ -v -m "not external"     # skip external-dependency tests
+filterwarnings = [
+    "ignore::DeprecationWarning:agents.feedback_agent",
+    "ignore::DeprecationWarning:agents.retraining_agent",
+]
