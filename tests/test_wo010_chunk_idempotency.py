@@ -10,6 +10,7 @@ from storage.db import get_connection
 from storage import repo
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     not os.getenv("DATABASE_URL"),
     reason="DATABASE_URL required for integration test",
@@ -64,6 +65,7 @@ def test_chunk_insert_idempotent():
     assert count_after_first == count_after_retry, "Retry must not duplicate chunks"
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     not os.getenv("DATABASE_URL"),
     reason="DATABASE_URL required for integration test",

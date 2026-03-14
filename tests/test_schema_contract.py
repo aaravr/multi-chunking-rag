@@ -7,6 +7,7 @@ from storage.schema_contract import check_schema_contract
 from storage.setup_db import run_setup
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     not os.getenv("TEST_DATABASE_URL"),
     reason="TEST_DATABASE_URL not set; skipping schema contract test.",

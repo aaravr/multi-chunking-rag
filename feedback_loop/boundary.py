@@ -92,10 +92,12 @@ class DefaultBoundaryPolicyGuard(BoundaryPolicyGuard):
 
         A row is valid if:
         1. It has a boundary_key attribute
-        2. The boundary_key matches the expected boundary
+        2. The boundary_key is a BoundaryKey with non-empty client
+        3. The boundary_key matches the expected boundary
 
-        Emits warnings for partial boundary keys (empty division/jurisdiction)
-        to surface potential isolation gaps during development.
+        Rejects rows with empty client (hard constraint). Warns on empty
+        division/jurisdiction but allows them — reduced-granularity isolation
+        is acceptable when explicitly configured, but must never be silent.
         """
         if not hasattr(row, "boundary_key"):
             logger.warning("Training row missing boundary_key: %s", type(row).__name__)
@@ -104,6 +106,14 @@ class DefaultBoundaryPolicyGuard(BoundaryPolicyGuard):
         row_boundary = row.boundary_key
         if not isinstance(row_boundary, BoundaryKey):
             logger.warning("Training row boundary_key is not a BoundaryKey: %s", type(row_boundary))
+            return False
+
+        # Hard constraint: client must be non-empty
+        if not row_boundary.client:
+            logger.error(
+                "BoundaryKey has empty client — training row REJECTED. "
+                "Every training row must carry a non-empty client identifier."
+            )
             return False
 
         # Warn on partial boundary keys — isolation may be weaker than intended

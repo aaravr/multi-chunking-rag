@@ -482,3 +482,22 @@ The path to enterprise-grade is clear and achievable: converge on the canonical 
 ### Bottom Line
 
 The next step is **convergence and hardening**, not feature expansion. The changes recommended in this review are concrete, scoped, and directly actionable by a coding agent.
+
+---
+
+## SECTION 13 — SECOND HARDENING PASS
+
+**Date:** 2026-03-14 (same session)
+
+After completing all P0/P1/P2 remediation, a second hardening pass addressed deeper architectural concerns:
+
+| # | Issue | Action Taken | Files Modified | Status |
+|---|-------|-------------|----------------|--------|
+| H2.1 | Deprecated agents in runtime registry | Removed `feedback` and `retraining` from `_AGENT_REGISTRY` in `agent_runner.py` | `agents/agent_runner.py` | **DONE** |
+| H2.2 | Boundary validation too permissive | Empty `client` now hard-rejected (not just warned). Empty division/jurisdiction still warned. | `feedback_loop/boundary.py` | **DONE** |
+| H2.3 | In-memory defaults hide production misconfiguration | Added `FeedbackLoopPipeline.create_production(get_conn)` and `create_test()` factory methods | `feedback_loop/pipeline.py` | **DONE** |
+| H2.4 | Project not pip-installable | Full `[project]` metadata in `pyproject.toml` with `[project.optional-dependencies]` groups | `pyproject.toml` | **DONE** |
+| H2.5 | No test stratification markers on test files | Added `@pytest.mark.integration` / `@pytest.mark.external` to DB/external tests; `conftest.py` auto-applies `unit` | `tests/conftest.py`, 5 test files | **DONE** |
+| H2.6 | Schema contract only checks column presence | Added `REQUIRED_UNIQUE_CONSTRAINTS` and `REQUIRED_INDEXES` validation | `storage/schema_contract.py` | **DONE** |
+| H2.7 | No implementation status overview | Created `docs/implementation_status.md` with subsystem matrix, test mapping, planned phases | `docs/implementation_status.md` | **DONE** |
+| H2.8 | Deprecated agents importable from runtime | Same as H2.1 — removed from registry; agents remain importable for backward compat but not auto-loaded | `agents/agent_runner.py` | **DONE** |

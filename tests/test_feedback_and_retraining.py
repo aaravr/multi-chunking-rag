@@ -439,10 +439,20 @@ class TestFeedbackRetrainingIntegration:
 
 
 class TestAgentRegistry:
-    def test_feedback_in_registry(self):
+    def test_feedback_not_in_registry(self):
+        """Deprecated feedback agent must NOT be in the runtime registry (§ENGINEERING_REVIEW §4)."""
         from agents.agent_runner import _AGENT_REGISTRY
-        assert "feedback" in _AGENT_REGISTRY
+        assert "feedback" not in _AGENT_REGISTRY
 
-    def test_retraining_in_registry(self):
+    def test_retraining_not_in_registry(self):
+        """Deprecated retraining agent must NOT be in the runtime registry (§ENGINEERING_REVIEW §4)."""
         from agents.agent_runner import _AGENT_REGISTRY
-        assert "retraining" in _AGENT_REGISTRY
+        assert "retraining" not in _AGENT_REGISTRY
+
+    def test_canonical_agents_in_registry(self):
+        """Active agents must be in the registry."""
+        from agents.agent_runner import _AGENT_REGISTRY
+        assert "router" in _AGENT_REGISTRY
+        assert "retriever" in _AGENT_REGISTRY
+        assert "synthesiser" in _AGENT_REGISTRY
+        assert "verifier" in _AGENT_REGISTRY

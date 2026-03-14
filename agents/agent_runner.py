@@ -580,8 +580,10 @@ _AGENT_REGISTRY: Dict[str, str] = {
     "retriever": "agents.retriever_agent.RetrieverAgent",
     "synthesiser": "agents.synthesiser_agent.SynthesiserAgent",
     "verifier": "agents.verifier_agent.VerifierAgent",
-    "feedback": "agents.feedback_agent.FeedbackAgent",
-    "retraining": "agents.retraining_agent.RetrainingAgent",
+    # "feedback" and "retraining" agents are DEPRECATED (§ENGINEERING_REVIEW §4).
+    # Use feedback_loop/ subsystem instead. Old agents are retained in the
+    # codebase for backward compatibility but excluded from runtime registration
+    # to prevent accidental use in new deployments.
 }
 
 

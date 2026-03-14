@@ -9,8 +9,9 @@ This is the main entry point for processing feedback events.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from feedback_loop.attribution import RuleBasedAttributionEngine
 from feedback_loop.boundary import DefaultBoundaryPolicyGuard
@@ -35,6 +36,9 @@ from feedback_loop.services import (
     InMemoryFeedbackIngestionService,
     InMemoryRetrainingOrchestrator,
     InMemoryTraceJoinService,
+    PostgresFeedbackIngestionService,
+    PostgresRetrainingOrchestrator,
+    PostgresTraceJoinService,
 )
 from feedback_loop.training_rows import DefaultTrainingRowBuilder
 
@@ -159,3 +163,34 @@ class FeedbackLoopPipeline:
             rows_submitted=rows_submitted,
             warnings=warnings,
         )
+
+    @classmethod
+    def create_production(cls, get_conn: Callable) -> FeedbackLoopPipeline:
+        """Factory for production pipeline with DB-backed services.
+
+        Requires an explicit connection factory. Fails fast if called
+        without one — no silent fallback to in-memory services.
+
+        Args:
+            get_conn: Callable returning a context-managed DB connection
+                (matching storage/db_pool.py pattern).
+        """
+        guard = DefaultBoundaryPolicyGuard()
+        return cls(
+            ingestion=PostgresFeedbackIngestionService(get_conn),
+            trace_join=PostgresTraceJoinService(get_conn),
+            normalizer=DefaultFeedbackNormalizer(),
+            attribution=RuleBasedAttributionEngine(),
+            row_builder=DefaultTrainingRowBuilder(),
+            boundary_guard=guard,
+            orchestrator=PostgresRetrainingOrchestrator(get_conn, boundary_guard=guard),
+        )
+
+    @classmethod
+    def create_test(cls) -> FeedbackLoopPipeline:
+        """Factory for test/local-dev pipeline with in-memory services.
+
+        Explicitly wires in-memory implementations. Use this for unit tests
+        and local development where no database is available.
+        """
+        return cls()
