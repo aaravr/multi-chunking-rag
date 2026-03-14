@@ -5,13 +5,10 @@ Enterprise-grade resilience for the Kafka A2A layer:
 1. CircuitBreaker — per-agent circuit breaker to prevent cascading failures.
    States: CLOSED → OPEN (after N failures) → HALF_OPEN (after cooldown) → CLOSED.
 
-2. RetryPolicy — exponential backoff with jitter for transient failures.
-   Distinguishes transient (timeout, broker unavailable) from permanent
-   (schema mismatch, validation error) failures.
+2. RetryPolicy — exponential backoff with jitter via ``tenacity``.
 
-3. IdempotencyStore — in-memory LRU deduplication keyed by correlation_id.
+3. IdempotencyStore — TTLCache-backed deduplication keyed by correlation_id.
    Prevents duplicate processing when Kafka delivers the same message twice.
-   Optional Redis backend for multi-instance deployments.
 
 4. DeadLetterRouter — routes poison pills and exhausted-retry messages to DLQ topics.
 """
@@ -19,13 +16,21 @@ Enterprise-grade resilience for the Kafka A2A layer:
 from __future__ import annotations
 
 import logging
-import random
 import threading
 import time
-from collections import OrderedDict, defaultdict
+from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, Optional, Set
+
+from cachetools import TTLCache
+from tenacity import (
+    RetryCallState,
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential_jitter,
+)
 
 from agents.serde import ErrorCode
 
@@ -134,7 +139,7 @@ class CircuitBreaker:
 
 
 # =====================================================================
-# Retry Policy
+# Retry Policy (tenacity-backed)
 # =====================================================================
 
 # Error codes that indicate transient failures (safe to retry)
@@ -156,6 +161,8 @@ PERMANENT_ERRORS: Set[str] = {
 class RetryPolicy:
     """Exponential backoff with jitter for transient Kafka failures.
 
+    Wraps ``tenacity`` for standard retry semantics.
+
     max_retries: total attempts including the first (so 3 = 1 original + 2 retries)
     base_delay_s: initial backoff delay
     max_delay_s: cap on backoff delay
@@ -175,22 +182,41 @@ class RetryPolicy:
         return True
 
     def delay_for_attempt(self, attempt: int) -> float:
-        """Compute delay with exponential backoff + jitter."""
-        delay = min(
-            self.base_delay_s * (2 ** (attempt - 1)),
-            self.max_delay_s,
+        """Compute delay with exponential backoff + jitter via tenacity internals."""
+        wait = wait_exponential_jitter(
+            initial=self.base_delay_s,
+            max=self.max_delay_s,
+            jitter=self.max_delay_s * self.jitter_factor,
         )
-        jitter = delay * self.jitter_factor * random.random()
-        return delay + jitter
+        # Build a minimal RetryCallState to compute the delay
+        state = RetryCallState(retry_object=None, fn=None, args=None, kwargs=None)  # type: ignore[arg-type]
+        state.attempt_number = attempt
+        return wait(state)
+
+    def retry_decorator(self, retryable_exceptions: tuple = (TimeoutError,)) -> Callable:
+        """Return a tenacity @retry decorator configured from this policy."""
+        return retry(
+            stop=stop_after_attempt(self.max_retries),
+            wait=wait_exponential_jitter(
+                initial=self.base_delay_s,
+                max=self.max_delay_s,
+                jitter=self.max_delay_s * self.jitter_factor,
+            ),
+            retry=retry_if_exception_type(retryable_exceptions),
+            reraise=True,
+        )
 
 
 # =====================================================================
-# Idempotency Store
+# Idempotency Store (cachetools.TTLCache-backed)
 # =====================================================================
+
+# Sentinel for "in-progress" entries (no response yet)
+_IN_PROGRESS = object()
 
 
 class IdempotencyStore:
-    """In-memory LRU deduplication store keyed by correlation_id.
+    """TTLCache-backed deduplication store keyed by correlation_id.
 
     Prevents duplicate processing when Kafka delivers at-least-once.
     Stores the response for duplicates so the runner can return the
@@ -200,9 +226,7 @@ class IdempotencyStore:
     """
 
     def __init__(self, max_entries: int = 50000, ttl_s: float = 300.0) -> None:
-        self._store: OrderedDict[str, _IdempotencyEntry] = OrderedDict()
-        self._max_entries = max_entries
-        self._ttl_s = ttl_s
+        self._cache: TTLCache = TTLCache(maxsize=max_entries, ttl=ttl_s)
         self._lock = threading.Lock()
 
     def check_and_set(self, correlation_id: str) -> Optional[Dict[str, Any]]:
@@ -211,62 +235,34 @@ class IdempotencyStore:
         Returns None if this is a new message (and marks it as in-progress).
         Returns the cached response if this is a duplicate.
         """
-        now = time.monotonic()
         with self._lock:
-            self._evict_expired(now)
-            entry = self._store.get(correlation_id)
+            entry = self._cache.get(correlation_id)
             if entry is not None:
-                if now - entry.created_at < self._ttl_s:
-                    self._store.move_to_end(correlation_id)
-                    return entry.response  # None if still processing, dict if done
-                else:
-                    del self._store[correlation_id]
+                return None if entry is _IN_PROGRESS else entry
 
             # New entry — mark as in-progress
-            self._store[correlation_id] = _IdempotencyEntry(
-                created_at=now, response=None
-            )
-            if len(self._store) > self._max_entries:
-                self._store.popitem(last=False)
+            self._cache[correlation_id] = _IN_PROGRESS
             return None
 
     def is_known(self, correlation_id: str) -> bool:
         """Check if a correlation_id exists in the store."""
         with self._lock:
-            return correlation_id in self._store
+            return correlation_id in self._cache
 
     def set_response(self, correlation_id: str, response: Dict[str, Any]) -> None:
         """Store the response for a processed message."""
         with self._lock:
-            entry = self._store.get(correlation_id)
-            if entry is not None:
-                self._store[correlation_id] = _IdempotencyEntry(
-                    created_at=entry.created_at, response=response
-                )
-
-    def _evict_expired(self, now: float) -> None:
-        """Remove expired entries from the front of the OrderedDict."""
-        while self._store:
-            oldest_key, oldest_entry = next(iter(self._store.items()))
-            if now - oldest_entry.created_at >= self._ttl_s:
-                del self._store[oldest_key]
-            else:
-                break
+            if correlation_id in self._cache:
+                self._cache[correlation_id] = response
 
     @property
     def size(self) -> int:
         with self._lock:
-            return len(self._store)
+            return len(self._cache)
 
     def clear(self) -> None:
         with self._lock:
-            self._store.clear()
-
-
-@dataclass
-class _IdempotencyEntry:
-    created_at: float
-    response: Optional[Dict[str, Any]]
+            self._cache.clear()
 
 
 # =====================================================================

@@ -1,108 +1,100 @@
-from dataclasses import dataclass
-import os
+"""Application settings via Pydantic BaseSettings (auto env-var binding)."""
+
+from pydantic import Field
+from pydantic_settings import BaseSettings
 
 
-def _get_bool_env(name: str, default: bool = False) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
-
-
-@dataclass
-class KafkaSettings:
+class KafkaSettings(BaseSettings):
     """Kafka A2A configuration (§5, §8)."""
-    enabled: bool = _get_bool_env("ENABLE_KAFKA_BUS", False)
-    bootstrap_servers: str = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
-    request_timeout_ms: int = int(os.getenv("KAFKA_REQUEST_TIMEOUT_MS", "30000"))
+    model_config = {"env_prefix": "KAFKA_"}
+
+    enabled: bool = Field(default=False, alias="ENABLE_KAFKA_BUS")
+    bootstrap_servers: str = "localhost:9092"
+    request_timeout_ms: int = 30000
     # Producer tuning
-    compression_type: str = os.getenv("KAFKA_COMPRESSION_TYPE", "lz4")
-    linger_ms: int = int(os.getenv("KAFKA_LINGER_MS", "5"))
-    batch_size: int = int(os.getenv("KAFKA_BATCH_SIZE", "16384"))
-    acks: str = os.getenv("KAFKA_ACKS", "all")
-    producer_retries: int = int(os.getenv("KAFKA_PRODUCER_RETRIES", "5"))
+    compression_type: str = "lz4"
+    linger_ms: int = 5
+    batch_size: int = 16384
+    acks: str = "all"
+    producer_retries: int = 5
     # Consumer tuning
-    max_poll_records: int = int(os.getenv("KAFKA_MAX_POLL_RECORDS", "10"))
-    session_timeout_ms: int = int(os.getenv("KAFKA_SESSION_TIMEOUT_MS", "30000"))
-    heartbeat_interval_ms: int = int(os.getenv("KAFKA_HEARTBEAT_INTERVAL_MS", "10000"))
-    fetch_min_bytes: int = int(os.getenv("KAFKA_FETCH_MIN_BYTES", "1"))
+    max_poll_records: int = 10
+    session_timeout_ms: int = 30000
+    heartbeat_interval_ms: int = 10000
+    fetch_min_bytes: int = 1
     # Resilience
-    circuit_breaker_threshold: int = int(os.getenv("KAFKA_CIRCUIT_BREAKER_THRESHOLD", "5"))
-    circuit_breaker_cooldown_s: float = float(os.getenv("KAFKA_CIRCUIT_BREAKER_COOLDOWN_S", "60"))
-    retry_max_attempts: int = int(os.getenv("KAFKA_RETRY_MAX_ATTEMPTS", "3"))
-    retry_base_delay_s: float = float(os.getenv("KAFKA_RETRY_BASE_DELAY_S", "1.0"))
-    retry_max_delay_s: float = float(os.getenv("KAFKA_RETRY_MAX_DELAY_S", "30.0"))
-    enable_dlq: bool = _get_bool_env("KAFKA_ENABLE_DLQ", True)
-    enable_idempotency: bool = _get_bool_env("KAFKA_ENABLE_IDEMPOTENCY", True)
-    idempotency_ttl_s: float = float(os.getenv("KAFKA_IDEMPOTENCY_TTL_S", "300"))
-    idempotency_max_entries: int = int(os.getenv("KAFKA_IDEMPOTENCY_MAX_ENTRIES", "50000"))
+    circuit_breaker_threshold: int = 5
+    circuit_breaker_cooldown_s: float = 60.0
+    retry_max_attempts: int = 3
+    retry_base_delay_s: float = 1.0
+    retry_max_delay_s: float = 30.0
+    enable_dlq: bool = True
+    enable_idempotency: bool = True
+    idempotency_ttl_s: float = 300.0
+    idempotency_max_entries: int = 50000
     # Security (SASL/TLS)
-    security_protocol: str = os.getenv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT")
-    sasl_mechanism: str = os.getenv("KAFKA_SASL_MECHANISM", "")
-    sasl_username: str = os.getenv("KAFKA_SASL_USERNAME", "")
-    sasl_password: str = os.getenv("KAFKA_SASL_PASSWORD", "")
-    ssl_cafile: str = os.getenv("KAFKA_SSL_CAFILE", "")
-    ssl_certfile: str = os.getenv("KAFKA_SSL_CERTFILE", "")
-    ssl_keyfile: str = os.getenv("KAFKA_SSL_KEYFILE", "")
+    security_protocol: str = "PLAINTEXT"
+    sasl_mechanism: str = ""
+    sasl_username: str = ""
+    sasl_password: str = ""
+    ssl_cafile: str = ""
+    ssl_certfile: str = ""
+    ssl_keyfile: str = ""
 
 
-@dataclass
-class OtelSettings:
+class OtelSettings(BaseSettings):
     """OpenTelemetry configuration (§5, §8)."""
-    enabled: bool = _get_bool_env("ENABLE_OTEL", False)
-    exporter_endpoint: str = os.getenv("OTEL_EXPORTER_ENDPOINT", "localhost:4317")
-    service_name: str = os.getenv("OTEL_SERVICE_NAME", "idp-agent")
-    sample_rate: float = float(os.getenv("OTEL_SAMPLE_RATE", "1.0"))
-    export_console: bool = _get_bool_env("OTEL_EXPORT_CONSOLE", False)
+    model_config = {"env_prefix": "OTEL_"}
+
+    enabled: bool = Field(default=False, alias="ENABLE_OTEL")
+    exporter_endpoint: str = Field(default="localhost:4317", alias="OTEL_EXPORTER_ENDPOINT")
+    service_name: str = Field(default="idp-agent", alias="OTEL_SERVICE_NAME")
+    sample_rate: float = Field(default=1.0, alias="OTEL_SAMPLE_RATE")
+    export_console: bool = Field(default=False, alias="OTEL_EXPORT_CONSOLE")
 
 
-@dataclass
-class Neo4jSettings:
+class Neo4jSettings(BaseSettings):
     """Neo4j Knowledge Graph configuration (§6.4)."""
-    enabled: bool = _get_bool_env("ENABLE_NEO4J", False)
-    uri: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-    user: str = os.getenv("NEO4J_USER", "neo4j")
-    password: str = os.getenv("NEO4J_PASSWORD", "neo4jpassword")
-    database: str = os.getenv("NEO4J_DATABASE", "neo4j")
+    model_config = {"env_prefix": "NEO4J_"}
+
+    enabled: bool = Field(default=False, alias="ENABLE_NEO4J")
+    uri: str = "bolt://localhost:7687"
+    user: str = "neo4j"
+    password: str = "neo4jpassword"
+    database: str = "neo4j"
 
 
-@dataclass
-class Settings:
-    database_url: str = os.getenv("DATABASE_URL", "")
-    db_pool_size: int = int(os.getenv("DB_POOL_SIZE", "5"))
+class Settings(BaseSettings):
+    """Main application settings — auto-populated from environment variables."""
+    model_config = {"env_prefix": "", "populate_by_name": True}
+
+    database_url: str = Field(default="", alias="DATABASE_URL")
+    db_pool_size: int = Field(default=5, alias="DB_POOL_SIZE")
     embedding_model: str = "nomic-ai/modernbert-embed-base"
     embedding_dim: int = 768
-    data_dir: str = os.getenv("IDP_DATA_DIR", "data")
-    disable_di: bool = _get_bool_env("DISABLE_DI", False)
-    enable_hybrid_retrieval: bool = _get_bool_env("ENABLE_HYBRID_RETRIEVAL", False)
-    enable_verifier: bool = _get_bool_env("ENABLE_VERIFIER", False)
-    enable_reranker: bool = _get_bool_env("ENABLE_RERANKER", False)
-    coverage_mode: str = os.getenv("COVERAGE_MODE", "llm_fallback")
-    enable_document_facts: bool = _get_bool_env("ENABLE_DOCUMENT_FACTS", False)
-    enable_classifier: bool = _get_bool_env("ENABLE_CLASSIFIER", False)
-    enable_preprocessor: bool = _get_bool_env("ENABLE_PREPROCESSOR", False)
-    front_matter_pages: int = int(os.getenv("FRONT_MATTER_PAGES", "10"))
-    reranker_model: str = os.getenv(
-        "RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    data_dir: str = Field(default="data", alias="IDP_DATA_DIR")
+    disable_di: bool = Field(default=False, alias="DISABLE_DI")
+    enable_hybrid_retrieval: bool = Field(default=False, alias="ENABLE_HYBRID_RETRIEVAL")
+    enable_verifier: bool = Field(default=False, alias="ENABLE_VERIFIER")
+    enable_reranker: bool = Field(default=False, alias="ENABLE_RERANKER")
+    coverage_mode: str = Field(default="llm_fallback", alias="COVERAGE_MODE")
+    enable_document_facts: bool = Field(default=False, alias="ENABLE_DOCUMENT_FACTS")
+    enable_classifier: bool = Field(default=False, alias="ENABLE_CLASSIFIER")
+    enable_preprocessor: bool = Field(default=False, alias="ENABLE_PREPROCESSOR")
+    front_matter_pages: int = Field(default=10, alias="FRONT_MATTER_PAGES")
+    reranker_model: str = Field(
+        default="cross-encoder/ms-marco-MiniLM-L-6-v2", alias="RERANKER_MODEL"
     )
-    enable_redis_working_memory: bool = _get_bool_env("ENABLE_REDIS_WORKING_MEMORY", True)
-    redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-    redis_working_memory_ttl: int = int(os.getenv("REDIS_WORKING_MEMORY_TTL", "900"))
+    enable_redis_working_memory: bool = Field(default=True, alias="ENABLE_REDIS_WORKING_MEMORY")
+    redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
+    redis_working_memory_ttl: int = Field(default=900, alias="REDIS_WORKING_MEMORY_TTL")
     # ── Sub-configs ──────────────────────────────────────────────────────
-    kafka: KafkaSettings = None  # type: ignore[assignment]
-    otel: OtelSettings = None  # type: ignore[assignment]
-    neo4j: Neo4jSettings = None  # type: ignore[assignment]
+    kafka: KafkaSettings = Field(default_factory=KafkaSettings)
+    otel: OtelSettings = Field(default_factory=OtelSettings)
+    neo4j: Neo4jSettings = Field(default_factory=Neo4jSettings)
     # ── Agent Evaluation ───────────────────────────────────────────────
-    enable_agent_eval: bool = _get_bool_env("ENABLE_AGENT_EVAL", False)
-    agent_eval_log_dir: str = os.getenv("AGENT_EVAL_LOG_DIR", "eval_logs")
-
-    def __post_init__(self):
-        if self.kafka is None:
-            self.kafka = KafkaSettings()
-        if self.otel is None:
-            self.otel = OtelSettings()
-        if self.neo4j is None:
-            self.neo4j = Neo4jSettings()
+    enable_agent_eval: bool = Field(default=False, alias="ENABLE_AGENT_EVAL")
+    agent_eval_log_dir: str = Field(default="eval_logs", alias="AGENT_EVAL_LOG_DIR")
 
 
 settings = Settings()

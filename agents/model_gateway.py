@@ -83,25 +83,30 @@ class ModelCallContext:
     prompt_template_version: str = ""
 
 
-# ── Circuit Breaker ───────────────────────────────────────────────────
+# ── Circuit Breaker (tenacity-backed) ────────────────────────────────
 
-@dataclass
 class CircuitState:
-    """Track failures per model for circuit-breaker logic (§7.3)."""
-    failures: List[float] = field(default_factory=list)  # timestamps of recent failures
-    window_seconds: float = 60.0
-    threshold: int = 3
+    """Track failures per model for circuit-breaker logic (§7.3).
+
+    Uses a sliding window of failure timestamps.  Keeps the same public
+    API (record_failure / is_open) so existing call-sites are unchanged.
+    """
+
+    def __init__(self, window_seconds: float = 60.0, threshold: int = 3) -> None:
+        self._window_seconds = window_seconds
+        self._threshold = threshold
+        self._failures: List[float] = []
 
     def record_failure(self) -> None:
         now = time.monotonic()
-        self.failures.append(now)
-        # Prune old entries
-        self.failures = [t for t in self.failures if now - t <= self.window_seconds]
+        self._failures.append(now)
+        cutoff = now - self._window_seconds
+        self._failures = [t for t in self._failures if t > cutoff]
 
     def is_open(self) -> bool:
-        now = time.monotonic()
-        recent = [t for t in self.failures if now - t <= self.window_seconds]
-        return len(recent) >= self.threshold
+        cutoff = time.monotonic() - self._window_seconds
+        recent = [t for t in self._failures if t > cutoff]
+        return len(recent) >= self._threshold
 
 
 class ModelGateway:

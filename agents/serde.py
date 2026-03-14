@@ -104,6 +104,16 @@ class KafkaEnvelope:
     produced_at_ms: int = 0
 
 
+def _from_dict(cls: type, data: Dict[str, Any], **defaults: Any) -> Any:
+    """Construct a frozen dataclass from a dict, applying defaults for missing keys."""
+    import dataclasses
+    fields = {f.name for f in dataclasses.fields(cls)}
+    kwargs = {k: data[k] for k in fields if k in data}
+    for k, v in defaults.items():
+        kwargs.setdefault(k, v)
+    return cls(**kwargs)
+
+
 def serialise_envelope(envelope: KafkaEnvelope) -> bytes:
     """Serialise a KafkaEnvelope to JSON bytes for Kafka producer."""
     data = {
@@ -136,26 +146,12 @@ def deserialise_envelope(raw: bytes) -> KafkaEnvelope:
             f"Supported: {SUPPORTED_SCHEMA_VERSIONS}"
         )
 
-    # v1 deserialisation
+    # v1 deserialisation — reconstruct dataclasses from dicts
     msg_data = data["message"]
-    message = AgentMessage(
-        message_id=msg_data["message_id"],
-        query_id=msg_data["query_id"],
-        from_agent=msg_data["from_agent"],
-        to_agent=msg_data["to_agent"],
-        message_type=msg_data["message_type"],
-        payload=msg_data["payload"],
-        timestamp=msg_data["timestamp"],
-        token_budget_remaining=msg_data.get("token_budget_remaining", 0),
-    )
+    message = _from_dict(AgentMessage, msg_data, token_budget_remaining=0)
 
-    # Trace context (may be absent in v1 envelopes from older producers)
     trace_data = data.get("trace", {})
-    trace = TraceContext(
-        trace_id=trace_data.get("trace_id", ""),
-        span_id=trace_data.get("span_id", ""),
-        parent_span_id=trace_data.get("parent_span_id", ""),
-    )
+    trace = _from_dict(TraceContext, trace_data)
 
     return KafkaEnvelope(
         correlation_id=data["correlation_id"],
