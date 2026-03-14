@@ -481,6 +481,52 @@ class ChunkingOutcome:
     quality_score: float = 0.0      # Optional quality metric (0–1)
 
 
+# ── Feedback & Retraining Contracts ─────────────────────────────────
+
+
+@dataclass(frozen=True)
+class FeedbackEntry:
+    """User feedback on a query answer — drives learning loop."""
+    feedback_id: str
+    query_id: str
+    doc_id: str
+    rating: str                     # "positive" | "negative" | "correction"
+    comment: str = ""
+    correct_answer: str = ""        # User-provided correction (if rating="correction")
+    cited_chunk_ids: List[str] = field(default_factory=list)  # Chunks user flagged
+    timestamp: str = ""
+
+
+@dataclass(frozen=True)
+class FeedbackResult:
+    """Output of FeedbackAgent — confirms feedback was routed."""
+    feedback_id: str
+    query_id: str
+    routed_to: List[str]            # Agents that received the feedback
+    actions_taken: List[str]        # Summary of actions (e.g., "updated_pattern_accuracy")
+
+
+@dataclass(frozen=True)
+class RetrainingRequest:
+    """Input to RetrainingAgent — specifies what to retrain."""
+    trigger: str                    # "scheduled" | "threshold" | "manual"
+    target_components: List[str] = field(default_factory=list)  # "classifier" | "preprocessor" | "all"
+    min_feedback_count: int = 10    # Minimum feedback entries to justify retraining
+    min_accuracy_delta: float = 0.05  # Minimum accuracy improvement to keep new model
+
+
+@dataclass(frozen=True)
+class RetrainingResult:
+    """Output of RetrainingAgent — reports what was retrained."""
+    retrained_components: List[str]
+    metrics_before: Dict[str, float] = field(default_factory=dict)
+    metrics_after: Dict[str, float] = field(default_factory=dict)
+    feedback_entries_used: int = 0
+    patterns_pruned: int = 0
+    duration_ms: float = 0.0
+    skipped_reason: str = ""        # Non-empty if retraining was skipped
+
+
 def new_id() -> str:
     """Generate a new UUID string."""
     return str(uuid.uuid4())

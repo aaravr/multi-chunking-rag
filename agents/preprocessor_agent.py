@@ -1317,6 +1317,13 @@ class OutcomeStore:
                       f"documents (avg quality={best_avg_quality:.2f}).",
         )
 
+    def lookup_by_doc_id(self, doc_id: str) -> List[ChunkingOutcome]:
+        """Return all outcomes for a specific document."""
+        results: List[ChunkingOutcome] = []
+        for outcomes in self._outcomes.values():
+            results.extend(o for o in outcomes if o.doc_id == doc_id)
+        return results
+
     def get_doc_ids_for_type(
         self, document_type: str, classification_label: str
     ) -> List[str]:

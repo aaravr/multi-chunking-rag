@@ -580,6 +580,8 @@ _AGENT_REGISTRY: Dict[str, str] = {
     "retriever": "agents.retriever_agent.RetrieverAgent",
     "synthesiser": "agents.synthesiser_agent.SynthesiserAgent",
     "verifier": "agents.verifier_agent.VerifierAgent",
+    "feedback": "agents.feedback_agent.FeedbackAgent",
+    "retraining": "agents.retraining_agent.RetrainingAgent",
 }
 
 
@@ -618,7 +620,7 @@ def main() -> None:
     parser.add_argument(
         "--agent",
         required=True,
-        choices=["router", "retriever", "synthesiser", "verifier"],
+        choices=sorted(_AGENT_REGISTRY),
         help="Which agent to run",
     )
     parser.add_argument(
