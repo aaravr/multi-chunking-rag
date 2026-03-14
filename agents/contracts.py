@@ -527,6 +527,160 @@ class RetrainingResult:
     skipped_reason: str = ""        # Non-empty if retraining was skipped
 
 
+# ── Extraction Schema Contracts (§10 — Schema-Driven Extraction) ──────
+
+
+@dataclass(frozen=True)
+class FieldDefinition:
+    """Declarative definition of a single field to extract from a document.
+
+    Teams define extraction schemas as lists of FieldDefinition objects.
+    The Extractor Agent uses these to drive structured extraction.
+    """
+    field_name: str                      # Machine-readable key (e.g. "total_revenue")
+    display_name: str                    # Human-readable label (e.g. "Total Revenue")
+    field_type: str                      # "text" | "number" | "currency" | "date" | "boolean" | "list"
+    required: bool = True
+    description: str = ""                # Describes what the field represents
+    validation_regex: Optional[str] = None  # Optional regex for validation
+    allowed_values: List[str] = field(default_factory=list)  # Enum constraint
+    default_value: Optional[str] = None
+    extraction_hint: str = ""            # Hint for LLM extraction (e.g. "Look in the financial statements")
+    normalize_via_mcp: bool = False      # If True, Transformer Agent will call MCP for normalization
+    mcp_lookup_key: str = ""             # Key to use when calling MCP reference data server
+
+
+@dataclass(frozen=True)
+class ExtractionSchema:
+    """A complete extraction schema for a document type.
+
+    Teams register schemas per document_type + classification_label.
+    The Extractor Agent selects the appropriate schema based on
+    the Classifier Agent's output.
+    """
+    schema_id: str
+    schema_name: str                     # Human-readable (e.g. "10-K Annual Report Fields")
+    document_type: str                   # Matches ClassificationResult.document_type
+    classification_label: str            # Matches ClassificationResult.classification_label
+    version: str = "1.0"
+    fields: List[FieldDefinition] = field(default_factory=list)
+    description: str = ""
+
+
+@dataclass(frozen=True)
+class ExtractedField:
+    """A single extracted field value with confidence and provenance."""
+    field_name: str
+    raw_value: str                       # As extracted from the document
+    normalized_value: str = ""           # After Transformer Agent normalization
+    confidence: float = 0.0              # 0.0–1.0 field-level confidence
+    source_chunk_ids: List[str] = field(default_factory=list)
+    page_numbers: List[int] = field(default_factory=list)
+    extraction_method: str = "llm"       # "llm" | "regex" | "deterministic" | "mcp_normalized"
+    validation_passed: bool = True
+    validation_errors: List[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ExtractionResult:
+    """Output of the Extractor Agent — all fields extracted from a document."""
+    doc_id: str
+    schema_id: str
+    query_id: str
+    fields: List[ExtractedField]
+    overall_confidence: float = 0.0      # Mean of field confidences
+    extraction_model: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    warnings: List[str] = field(default_factory=list)
+
+
+# ── Transformer Agent Contracts (§10.2 — Value Normalization) ─────────
+
+
+@dataclass(frozen=True)
+class TransformationRule:
+    """Defines how a field value should be transformed/normalized."""
+    field_name: str
+    transform_type: str                  # "mcp_lookup" | "regex_replace" | "date_format" | "currency_convert" | "uppercase" | "lowercase"
+    mcp_server_url: str = ""             # MCP server endpoint for reference data lookup
+    mcp_lookup_key: str = ""             # Key for MCP lookup (e.g. "entity_name", "currency_code")
+    regex_pattern: str = ""
+    regex_replacement: str = ""
+    date_input_format: str = ""
+    date_output_format: str = ""
+
+
+@dataclass(frozen=True)
+class TransformResult:
+    """Output of the Transformer Agent — normalized field values."""
+    doc_id: str
+    query_id: str
+    transformed_fields: List[ExtractedField]  # Fields with normalized_value populated
+    mcp_lookups_performed: int = 0
+    mcp_lookups_failed: int = 0
+    warnings: List[str] = field(default_factory=list)
+
+
+# ── MCP Reference Data Contract (§10.3) ──────────────────────────────
+# Teams MUST implement this contract for their reference data MCP servers.
+# The platform provides a reference implementation; teams can override.
+
+
+@dataclass(frozen=True)
+class MCPLookupRequest:
+    """Request to an MCP reference data server.
+
+    This is the STANDARD CONTRACT that all team MCP servers must implement.
+    Teams provide their own MCP server but MUST accept this request shape.
+    """
+    lookup_key: str                      # What to look up (e.g. "entity_name")
+    lookup_value: str                    # The raw value to normalize
+    context: Dict[str, str] = field(default_factory=dict)  # Additional context (doc_type, etc.)
+
+
+@dataclass(frozen=True)
+class MCPLookupResponse:
+    """Response from an MCP reference data server.
+
+    This is the STANDARD CONTRACT that all team MCP servers must return.
+    Teams MUST adhere to this contract even if they implement their own server.
+    """
+    lookup_key: str
+    original_value: str
+    canonical_value: str                 # The normalized/canonical form
+    confidence: float = 1.0              # How confident the lookup is (1.0 = exact match)
+    source: str = ""                     # Where the reference data came from
+    alternatives: List[str] = field(default_factory=list)  # Other possible matches
+    matched: bool = True                 # Whether a match was found
+
+
+# ── Parser Abstraction Contracts (§10.4 — Pluggable Parsers) ─────────
+
+
+@dataclass(frozen=True)
+class ParsedPage:
+    """Unified output from any document parser (PyMUPDF, Docling, etc.)."""
+    page_number: int
+    text_content: str
+    tables: List[Dict[str, Any]] = field(default_factory=list)  # [{markdown, bbox, cells}]
+    images: List[Dict[str, Any]] = field(default_factory=list)  # [{bbox, alt_text}]
+    headings: List[Dict[str, Any]] = field(default_factory=list)  # [{text, level, bbox}]
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ParsedDocument:
+    """Complete parsed output from a document parser."""
+    doc_id: str
+    filename: str
+    page_count: int
+    pages: List[ParsedPage]
+    parser_name: str                     # "pymupdf" | "docling" | "azure_di"
+    file_format: str                     # "pdf" | "docx" | "xlsx" | "csv" | "json" | "html"
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
 def new_id() -> str:
     """Generate a new UUID string."""
     return str(uuid.uuid4())

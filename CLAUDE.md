@@ -18,10 +18,13 @@ Enterprise-grade Agentic Intelligent Document Processing (IDP) RAG platform, evo
 | Embeddings | nomic-ai/modernbert-embed-base (768-dim, CPU) |
 | Database | PostgreSQL 14 + pgvector (HNSW index) |
 | DB Access | psycopg2 + ThreadedConnectionPool + execute_values |
-| PDF Parsing | PyMUPDF (fitz) |
+| PDF Parsing | PyMUPDF (fitz) + Docling (optional) |
+| Document Parsing | Parser abstraction: PyMUPDF, Docling, DOCX, Excel, CSV, JSON, HTML |
 | Document Intelligence | Azure Document Intelligence SDK |
+| LLM Provider | OpenAI (default) or Azure OpenAI (via LLM_PROVIDER config) |
 | Lexical Search | rank-bm25 (BM25Okapi) |
 | Reranking | cross-encoder/ms-marco-MiniLM-L-6-v2 (optional) |
+| Extraction | Schema-driven field extraction with MCP reference data normalization |
 | Testing | pytest |
 
 ## Repository Structure
@@ -39,11 +42,18 @@ agents/           Enterprise agent framework (MASTER_PROMPT §4-§5)
   retriever_agent.py Evidence finder (§4.3)
   synthesiser_agent.py Answer generation (§4.4)
   verifier_agent.py  Claim verification (§4.5)
+  extractor_agent.py Schema-driven field extraction (§10.1)
+  transformer_agent.py Value normalization via MCP (§10.2)
+  mcp_reference_server.py MCP reference data server (§10.3)
 app/              Streamlit UI (poc_app.py)
 core/             Config (config.py), contracts (contracts.py), logging
 embedding/        Late chunking (late_chunking.py), ModernBERT embedder, model registry singleton
 grounding/        PDF highlight annotations from chunk polygons
-ingestion/        PDF ingestion pipeline, page triage, canonicalization, Azure DI client, document facts
+ingestion/        Multi-format ingestion pipeline, page triage, canonicalization, Azure DI client, document facts
+  parser_base.py    Parser abstraction layer (§10.4)
+  pymupdf_parser.py PyMUPDF parser backend (default)
+  docling_parser.py Docling parser backend (optional)
+  multi_format_parser.py DOCX, Excel, CSV, JSON, HTML parsers
 retrieval/        Vector search, BM25 hybrid, intent-based query routing, metadata queries, reranking
 storage/          DB pool, schema, migrations, repository CRUD, schema contract validation
 synthesis/        LLM answer synthesis, coverage extraction, verifier, prompts
@@ -80,6 +90,16 @@ Copy `.env.example` to `.env`. Key variables:
 - `ENABLE_RERANKER` — Cross-encoder reranking (default: false)
 - `ENABLE_DOCUMENT_FACTS` — Cache metadata facts (default: false)
 - `COVERAGE_MODE` — `deterministic` | `llm_fallback` | `llm_always` (default: llm_fallback)
+- `ENABLE_EXTRACTOR` — Schema-driven field extraction (default: false)
+- `ENABLE_TRANSFORMER` — Value normalization via MCP (default: false)
+- `MCP_REFERENCE_SERVER_URL` — MCP reference data server (default: http://localhost:8100)
+- `LLM_PROVIDER` — `openai` | `azure_openai` (default: openai)
+- `AZURE_OPENAI_ENDPOINT` — Azure OpenAI resource endpoint
+- `AZURE_OPENAI_API_KEY` — Azure OpenAI API key
+- `AZURE_OPENAI_API_VERSION` — Azure API version (default: 2024-06-01)
+- `AZURE_OPENAI_DEPLOYMENT_ID` — Azure deployment name (overrides model_id)
+- `ENABLE_MULTI_FORMAT` — DOCX, Excel, CSV, JSON, HTML ingestion (default: false)
+- `PARSER_BACKEND` — `pymupdf` | `docling` (default: pymupdf)
 
 ## Absolute Invariants (MASTER_PROMPT §2 — MUST NEVER BREAK)
 
@@ -98,6 +118,8 @@ Copy `.env.example` to `.env`. Key variables:
 | **Retriever** | Locate → Expand → Select → Rerank pipeline | None (deterministic) |
 | **Synthesiser** | Evidence-grounded answer generation | Tier-2 (GPT-4o-mini/Sonnet) |
 | **Verifier** | Per-claim citation verification | Deterministic + SLM |
+| **Extractor** | Schema-driven field extraction (§10.1) | Tier-2 (GPT-4o-mini/Sonnet) |
+| **Transformer** | Value normalization via MCP reference data (§10.2) | None (deterministic + MCP) |
 | **Compliance** | PII detection, access control, policy rules | Deterministic + SLM |
 | **Explainability** | 4-level audit report generation | Tier-2 |
 
@@ -121,6 +143,10 @@ Copy `.env.example` to `.env`. Key variables:
 - **Bulk Inserts:** `storage/repo.py` — uses `execute_values()` for batch performance
 - **BM25 Caching:** JSON-based cache (never pickle) in `retrieval/bm25_index.py`
 - **Feature Flags:** All optional features controlled via `core/config.py` Settings dataclass
+- **Schema-Driven Extraction:** Declarative field schemas in `agents/extractor_agent.py` — regex-first with LLM fallback, per-field confidence
+- **MCP Reference Data:** Team-extensible reference data via `agents/mcp_reference_server.py` — standard contract (MCPLookupRequest/Response), reference implementation ships with platform
+- **Parser Abstraction:** Pluggable parsers via `ingestion/parser_base.py` — PyMUPDF default, Docling optional, multi-format (DOCX, Excel, CSV, JSON, HTML)
+- **Azure OpenAI:** Dual-provider support via `LLM_PROVIDER` config — vanilla OpenAI or Azure OpenAI with deployment ID override
 
 ## Naming Conventions
 
@@ -174,7 +200,14 @@ See `hardening.md` and `KNOWLEDGE_HARDENING.md` for full rules.
 - **episodic_memory** — per-user-per-document memory (query history, fact cache, annotations)
 - **prompt_templates** — template_id, intent_type, version, template_text
 
-Migrations in `storage/migrations/` (001-004, applied by `setup_db.py`).
+### Extraction & Transform Tables (Migration 008 — 5 new tables)
+- **extraction_schemas** — schema_id PK, document_type, classification_label, version, fields_json (JSONB)
+- **extracted_fields** — extraction_id PK, doc_id, schema_id, field_name, raw_value, normalized_value, confidence, source_chunk_ids[], extraction_method
+- **extraction_results** — result_id PK, doc_id, schema_id, overall_confidence, extraction_model
+- **mcp_lookup_log** — lookup_id PK, doc_id, field_name, lookup_key/value, canonical_value, confidence, matched
+- **transformation_rules** — rule_id PK, schema_id, field_name, transform_type, mcp_server_url
+
+Migrations in `storage/migrations/` (001-008, applied by `setup_db.py`).
 
 ## Implementation Phases (MASTER_PROMPT §12)
 
@@ -185,6 +218,7 @@ Migrations in `storage/migrations/` (001-004, applied by `setup_db.py`).
 | 3. Core Agents | Complete | Retriever, Synthesiser, Verifier agents wrapped in contracts |
 | 4. Router Agent (Extended) | Complete | ComparisonQuery, MultiHopQuery, AggregationQuery, MetadataQuery |
 | 5. Orchestrator Agent | Complete | ReAct loop, sub-task delegation, token budget tracking |
+| 5a. Extraction Pipeline | Complete | Extractor Agent, Transformer Agent, MCP reference data, parser abstraction, Azure OpenAI, multi-format |
 | 6. Memory System | Planned | Conversational + episodic memory, coreference resolution |
 | 7. Compliance & Explainability | Planned | PII detection, access control, 4-level explainability reports |
 | 8. Multi-Document & Security | Planned | Cross-corpus search, RBAC, JWT auth, entity graph |

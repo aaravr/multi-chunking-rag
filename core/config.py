@@ -95,6 +95,22 @@ class Settings(BaseSettings):
     # ── Agent Evaluation ───────────────────────────────────────────────
     enable_agent_eval: bool = Field(default=False, alias="ENABLE_AGENT_EVAL")
     agent_eval_log_dir: str = Field(default="eval_logs", alias="AGENT_EVAL_LOG_DIR")
+    # ── Schema-Driven Extraction (§10) ────────────────────────────────
+    enable_extractor: bool = Field(default=False, alias="ENABLE_EXTRACTOR")
+    enable_transformer: bool = Field(default=False, alias="ENABLE_TRANSFORMER")
+    # ── MCP Reference Data ────────────────────────────────────────────
+    mcp_reference_server_url: str = Field(default="http://localhost:8100", alias="MCP_REFERENCE_SERVER_URL")
+    mcp_request_timeout_s: int = Field(default=10, alias="MCP_REQUEST_TIMEOUT_S")
+    # ── Azure OpenAI ──────────────────────────────────────────────────
+    azure_openai_endpoint: str = Field(default="", alias="AZURE_OPENAI_ENDPOINT")
+    azure_openai_api_key: str = Field(default="", alias="AZURE_OPENAI_API_KEY")
+    azure_openai_api_version: str = Field(default="2024-06-01", alias="AZURE_OPENAI_API_VERSION")
+    azure_openai_deployment_id: str = Field(default="", alias="AZURE_OPENAI_DEPLOYMENT_ID")
+    llm_provider: str = Field(default="openai", alias="LLM_PROVIDER")  # "openai" | "azure_openai"
+    # ── Multi-Format Ingestion ────────────────────────────────────────
+    enable_multi_format: bool = Field(default=False, alias="ENABLE_MULTI_FORMAT")
+    # ── Parser Backend ────────────────────────────────────────────────
+    parser_backend: str = Field(default="pymupdf", alias="PARSER_BACKEND")  # "pymupdf" | "docling"
 
 
 settings = Settings()

@@ -280,10 +280,31 @@ class ModelGateway:
         messages: List[Dict[str, str]],
         temperature: float,
     ) -> Dict[str, Any]:
-        """Execute an LLM call via injected callable or default OpenAI client (DIP)."""
+        """Execute an LLM call via injected callable, Azure OpenAI, or default OpenAI client (DIP).
+
+        Provider selection (§7.3):
+        - If llm_caller injected → use it (DIP for testing)
+        - If LLM_PROVIDER=azure_openai and AZURE_OPENAI_ENDPOINT set → use Azure OpenAI
+        - Otherwise → use vanilla OpenAI
+        """
         if self._llm_caller is not None:
             return self._llm_caller(model_id, messages, temperature)
 
+        provider = os.getenv("LLM_PROVIDER", "openai").lower()
+        azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "")
+
+        if provider == "azure_openai" and azure_endpoint:
+            return self._execute_azure_openai_call(model_id, messages, temperature)
+
+        return self._execute_vanilla_openai_call(model_id, messages, temperature)
+
+    def _execute_vanilla_openai_call(
+        self,
+        model_id: str,
+        messages: List[Dict[str, str]],
+        temperature: float,
+    ) -> Dict[str, Any]:
+        """Execute via vanilla OpenAI API."""
         from openai import OpenAI
 
         api_key = os.getenv("OPENAI_API_KEY", "")
@@ -293,6 +314,51 @@ class ModelGateway:
         client = OpenAI(api_key=api_key)
         response = client.chat.completions.create(
             model=model_id,
+            messages=messages,
+            temperature=temperature,
+        )
+        choice = response.choices[0]
+        usage = response.usage
+        return {
+            "content": choice.message.content.strip() if choice.message.content else "",
+            "input_tokens": usage.prompt_tokens if usage else 0,
+            "output_tokens": usage.completion_tokens if usage else 0,
+        }
+
+    def _execute_azure_openai_call(
+        self,
+        model_id: str,
+        messages: List[Dict[str, str]],
+        temperature: float,
+    ) -> Dict[str, Any]:
+        """Execute via Azure OpenAI API.
+
+        Requires environment variables:
+        - AZURE_OPENAI_ENDPOINT: Azure resource endpoint
+        - AZURE_OPENAI_API_KEY: Azure API key
+        - AZURE_OPENAI_API_VERSION: API version (default: 2024-06-01)
+        - AZURE_OPENAI_DEPLOYMENT_ID: Deployment name (overrides model_id)
+        """
+        from openai import AzureOpenAI
+
+        endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "")
+        api_key = os.getenv("AZURE_OPENAI_API_KEY", "")
+        api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-06-01")
+        deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_ID", "") or model_id
+
+        if not endpoint or not api_key:
+            raise RuntimeError(
+                "AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY are required "
+                "when LLM_PROVIDER=azure_openai."
+            )
+
+        client = AzureOpenAI(
+            azure_endpoint=endpoint,
+            api_key=api_key,
+            api_version=api_version,
+        )
+        response = client.chat.completions.create(
+            model=deployment,
             messages=messages,
             temperature=temperature,
         )

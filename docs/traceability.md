@@ -217,6 +217,64 @@ Chunking outcome learning loop	§4.9	agents/preprocessor_agent.py (record_outcom
 
 ⸻
 
+15. Schema-Driven Extraction (§10)
+
+Requirement	Spec Ref	Impl	Tests	Status
+ExtractionSchema + FieldDefinition contracts	§10.1	agents/contracts.py	tests/test_extractor_agent.py	Complete
+Data Extractor Agent (regex + LLM)	§10.1	agents/extractor_agent.py	tests/test_extractor_agent.py	Complete
+Per-field confidence scoring	§10.1	agents/contracts.py (ExtractedField.confidence)	tests/test_extractor_agent.py::test_overall_confidence	Complete
+Field validation (regex, allowed_values, required)	§10.1	agents/extractor_agent.py (_validate_field)	tests/test_extractor_agent.py::test_allowed_values_validation	Complete
+Schema registry (register/get/list)	§10.1	agents/extractor_agent.py	tests/test_extractor_agent.py::test_register_and_get_schema	Complete
+Feature flag ENABLE_EXTRACTOR	§10.1	core/config.py	Manual toggle	Complete
+DB migration (extraction tables)	§10.1	storage/migrations/008_extraction_schema.sql	Schema test	Complete
+
+⸻
+
+16. Transformer Agent & MCP Reference Data (§10.2, §10.3)
+
+Requirement	Spec Ref	Impl	Tests	Status
+MCPLookupRequest/Response contracts	§10.3	agents/contracts.py	tests/test_transformer_agent.py::test_mcp_*	Complete
+MCP Reference Server (reference impl)	§10.3	agents/mcp_reference_server.py	tests/test_transformer_agent.py::test_direct_lookup_*	Complete
+Transformer Agent (MCP lookup + transforms)	§10.2	agents/transformer_agent.py	tests/test_transformer_agent.py	Complete
+Date/case/regex transforms	§10.2	agents/transformer_agent.py	tests/test_transformer_agent.py::test_transformer_date_format	Complete
+TransformationRule registry	§10.2	agents/transformer_agent.py	tests/test_transformer_agent.py::test_register_and_get_rules	Complete
+Feature flag ENABLE_TRANSFORMER	§10.2	core/config.py	Manual toggle	Complete
+
+⸻
+
+17. Parser Abstraction Layer (§10.4)
+
+Requirement	Spec Ref	Impl	Tests	Status
+BaseParser abstract class	§10.4	ingestion/parser_base.py	tests/test_parser_abstraction.py	Complete
+PyMuPDF parser backend	§10.4	ingestion/pymupdf_parser.py	tests/test_parser_abstraction.py::test_pymupdf_*	Complete
+Docling parser backend (optional)	§10.4	ingestion/docling_parser.py	Requires docling install	Complete
+Parser registry (register/get/list)	§10.4	ingestion/parser_base.py	tests/test_parser_abstraction.py::test_register_*	Complete
+Config PARSER_BACKEND	§10.4	core/config.py	Manual toggle	Complete
+
+⸻
+
+18. Azure OpenAI Support (§7.3)
+
+Requirement	Spec Ref	Impl	Tests	Status
+Azure OpenAI via AzureOpenAI client	§7.3	agents/model_gateway.py (_execute_azure_openai_call)	tests/test_azure_openai.py	Complete
+LLM_PROVIDER config flag	§7.3	core/config.py	tests/test_azure_openai.py::test_azure_openai_provider_selection	Complete
+Fallback to vanilla OpenAI	§7.3	agents/model_gateway.py	tests/test_azure_openai.py::test_fallback_to_vanilla	Complete
+Azure deployment ID override	§7.3	agents/model_gateway.py	tests/test_azure_openai.py	Complete
+
+⸻
+
+19. Multi-Format Document Ingestion (§10.5)
+
+Requirement	Spec Ref	Impl	Tests	Status
+DOCX parser (python-docx)	§10.5	ingestion/multi_format_parser.py (DocxParser)	Requires python-docx	Complete
+Excel parser (openpyxl)	§10.5	ingestion/multi_format_parser.py (ExcelParser)	Requires openpyxl	Complete
+CSV parser (stdlib)	§10.5	ingestion/multi_format_parser.py (CsvParser)	tests/test_parser_abstraction.py::test_csv_*	Complete
+JSON parser (stdlib)	§10.5	ingestion/multi_format_parser.py (JsonParser)	tests/test_parser_abstraction.py::test_json_*	Complete
+HTML parser (beautifulsoup4)	§10.5	ingestion/multi_format_parser.py (HtmlParser)	Requires bs4	Complete
+Config ENABLE_MULTI_FORMAT	§10.5	core/config.py	Manual toggle	Complete
+
+⸻
+
 Usage Rule
 	•	Every PR MUST update this file if it adds, completes, or modifies a requirement.
 	•	A PR that touches code without updating traceability must be rejected.
