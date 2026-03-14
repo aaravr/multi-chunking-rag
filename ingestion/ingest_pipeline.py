@@ -244,27 +244,21 @@ def ingest_and_chunk(
         progress_cb("embed", 0, len(canonical_pages))
     chunk_start_time = time.monotonic()
 
-    # ── Select chunking method based on processing level + strategy ───
-    if processing_level == "single_chunk":
-        chunks = _build_single_chunk(doc_id, canonical_pages)
-    elif processing_level == "page_level":
-        chunks = _build_page_level_chunks(doc_id, canonical_pages)
-    else:
-        # Check if the strategy_name maps to a registered chunking strategy
-        strategy_name = (
-            preprocess_result.chunking_strategy.strategy_name
-            if preprocess_result else ""
-        )
-        chunks = _dispatch_chunking_strategy(
-            doc_id=doc_id,
-            canonical_pages=canonical_pages,
-            strategy_name=strategy_name,
-            macro_max_tokens=macro_max_tokens,
-            macro_overlap_tokens=macro_overlap_tokens,
-            child_target_tokens=child_target_tokens,
-            progress_cb=progress_cb,
-            gateway=_get_gateway_if_needed(strategy_name),
-        )
+    # ── Delegate chunking to PreprocessorAgent ──────────────────────
+    #  The PreprocessorAgent owns the full chunking pipeline, including
+    #  multi-chunking (different strategies per document section).
+    bus = MessageBus()
+    gateway = _get_gateway_if_needed(
+        preprocess_result.chunking_strategy.strategy_name if preprocess_result else ""
+    )
+    preprocessor = PreprocessorAgent(bus=bus, gateway=gateway)
+    chunks = preprocessor.process_document(
+        doc_id=doc_id,
+        canonical_pages=canonical_pages,
+        classification=classification,
+        preprocess_result=preprocess_result,
+        progress_cb=progress_cb,
+    )
 
     chunk_elapsed_ms = (time.monotonic() - chunk_start_time) * 1000
 

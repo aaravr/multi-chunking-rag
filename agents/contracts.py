@@ -414,6 +414,26 @@ class ChunkingStrategy:
 
 
 @dataclass(frozen=True)
+class SectionStrategy:
+    """Maps a page range within a document to a specific chunking strategy.
+
+    Enables multi-chunking: different parts of the same document can use
+    different algorithms.  For example, a 10-K might use:
+    - ``semantic`` for narrative risk factors (pages 5-30)
+    - ``table_aware`` for financial statements (pages 31-50)
+    - ``clause_aware`` for legal exhibits (pages 51-80)
+
+    The PreprocessorAgent produces a list of SectionStrategy objects when
+    ``multi_chunking`` is enabled, covering all pages of the document.
+    """
+    page_start: int                 # Inclusive (1-based)
+    page_end: int                   # Inclusive (1-based)
+    content_type: str               # "narrative" | "tabular" | "legal" | "mixed" | "boilerplate"
+    chunking_strategy: ChunkingStrategy
+    rationale: str = ""
+
+
+@dataclass(frozen=True)
 class PreprocessorInput:
     """Input to the Preprocessor Agent — document metadata for chunking decision."""
     doc_id: str
@@ -428,7 +448,12 @@ class PreprocessorInput:
 
 @dataclass(frozen=True)
 class PreprocessorResult:
-    """Output of the Preprocessor Agent — chunking decision + strategy."""
+    """Output of the Preprocessor Agent — chunking decision + strategy.
+
+    When ``section_strategies`` is non-empty, multi-chunking is active and
+    each section gets its own chunking algorithm.  The top-level
+    ``chunking_strategy`` serves as the default/fallback.
+    """
     doc_id: str
     requires_chunking: bool
     chunking_strategy: ChunkingStrategy
@@ -436,6 +461,7 @@ class PreprocessorResult:
     decision_method: str            # "deterministic" | "learned" | "default"
     learned_from_doc_ids: List[str] = field(default_factory=list)  # Prior docs that informed this
     warnings: List[str] = field(default_factory=list)
+    section_strategies: List[SectionStrategy] = field(default_factory=list)  # Multi-chunking sections
 
 
 @dataclass(frozen=True)
