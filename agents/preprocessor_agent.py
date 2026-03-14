@@ -1419,51 +1419,59 @@ class PreprocessorAgent(BaseAgent):
         )
         return self.determine_strategy(inp)
 
+    @staticmethod
+    def _build_result(
+        doc_id: str,
+        strategy: ChunkingStrategy,
+        confidence: float,
+        decision_method: str,
+        warnings: List[str],
+        learned_from_doc_ids: Optional[List[str]] = None,
+    ) -> PreprocessorResult:
+        """Build a PreprocessorResult with derived requires_chunking flag."""
+        requires_chunking = strategy.processing_level not in ("skip", "metadata_only")
+        return PreprocessorResult(
+            doc_id=doc_id,
+            requires_chunking=requires_chunking,
+            chunking_strategy=strategy,
+            confidence=confidence,
+            decision_method=decision_method,
+            learned_from_doc_ids=learned_from_doc_ids or [],
+            warnings=warnings,
+        )
+
     def determine_strategy(self, inp: PreprocessorInput) -> PreprocessorResult:
         """Core decision logic: determine processing strategy for a document.
 
-        Returns a PreprocessorResult with:
-        - requires_chunking: whether to proceed with chunking/embedding
-        - chunking_strategy: the selected ChunkingStrategy (incl. processing_level)
-        - confidence: how confident the decision is
-        - decision_method: which tier made the decision
+        3-tier strategy selection:
+        Tier 0 — Skip empty/corrupt documents
+        Tier 1 — Deterministic rules (document_type → known strategy)
+        Tier 2 — Learned from past chunking outcomes
+        Tier 3 — Heuristic fallback (complexity assessment)
         """
         start_ms = time.monotonic() * 1000
         warnings: List[str] = []
 
         # ── Tier 0: Skip check ───────────────────────────────────────
         if inp.page_count == 0:
-            return PreprocessorResult(
-                doc_id=inp.doc_id,
-                requires_chunking=False,
-                chunking_strategy=_SKIP_STRATEGY,
-                confidence=1.0,
-                decision_method="deterministic",
-                warnings=["Document has 0 pages — skipping processing."],
+            return self._build_result(
+                inp.doc_id, _SKIP_STRATEGY, 1.0, "deterministic",
+                ["Document has 0 pages — skipping processing."],
             )
 
-        # Check triage summary for empty documents
         triage = inp.triage_summary
-        if triage:
-            total_text = triage.get("total_text_length", -1)
-            if total_text == 0:
-                return PreprocessorResult(
-                    doc_id=inp.doc_id,
-                    requires_chunking=False,
-                    chunking_strategy=_SKIP_STRATEGY,
-                    confidence=1.0,
-                    decision_method="deterministic",
-                    warnings=["Document has no extractable text — skipping processing."],
-                )
+        if triage and triage.get("total_text_length", -1) == 0:
+            return self._build_result(
+                inp.doc_id, _SKIP_STRATEGY, 1.0, "deterministic",
+                ["Document has no extractable text — skipping processing."],
+            )
 
         # ── Tier 1: Deterministic rules ──────────────────────────────
         strategy = self._deterministic_lookup(
             inp.document_type, inp.classification_label
         )
         if strategy is not None:
-            # Adjust strategy based on triage signals
             strategy = self._adjust_for_triage(strategy, triage, warnings)
-            requires_chunking = strategy.processing_level not in ("skip", "metadata_only")
             elapsed = time.monotonic() * 1000 - start_ms
             logger.info(
                 "Preprocessor: deterministic strategy '%s' (level=%s) for "
@@ -1472,13 +1480,8 @@ class PreprocessorAgent(BaseAgent):
                 inp.doc_id, inp.document_type, inp.classification_label,
                 elapsed,
             )
-            return PreprocessorResult(
-                doc_id=inp.doc_id,
-                requires_chunking=requires_chunking,
-                chunking_strategy=strategy,
-                confidence=0.95,
-                decision_method="deterministic",
-                warnings=warnings,
+            return self._build_result(
+                inp.doc_id, strategy, 0.95, "deterministic", warnings,
             )
 
         # ── Tier 2: Learned from past outcomes ───────────────────────
@@ -1491,7 +1494,6 @@ class PreprocessorAgent(BaseAgent):
                 prior_ids = self._outcome_store.get_doc_ids_for_type(
                     inp.document_type, inp.classification_label
                 )
-                requires_chunking = learned.processing_level not in ("skip", "metadata_only")
                 elapsed = time.monotonic() * 1000 - start_ms
                 logger.info(
                     "Preprocessor: learned strategy '%s' (level=%s) for "
@@ -1499,20 +1501,14 @@ class PreprocessorAgent(BaseAgent):
                     learned.strategy_name, learned.processing_level,
                     inp.doc_id, len(prior_ids), elapsed,
                 )
-                return PreprocessorResult(
-                    doc_id=inp.doc_id,
-                    requires_chunking=requires_chunking,
-                    chunking_strategy=learned,
-                    confidence=0.75,
-                    decision_method="learned",
+                return self._build_result(
+                    inp.doc_id, learned, 0.75, "learned", warnings,
                     learned_from_doc_ids=prior_ids[:10],
-                    warnings=warnings,
                 )
 
         # ── Tier 3: Heuristic fallback ─────────────────────────────
         strategy = self._assess_complexity(inp, warnings)
         strategy = self._adjust_for_triage(strategy, triage, warnings)
-        requires_chunking = strategy.processing_level not in ("skip", "metadata_only")
         elapsed = time.monotonic() * 1000 - start_ms
         logger.info(
             "Preprocessor: heuristic strategy '%s' (level=%s) for doc %s "
@@ -1520,13 +1516,8 @@ class PreprocessorAgent(BaseAgent):
             strategy.strategy_name, strategy.processing_level,
             inp.doc_id, elapsed,
         )
-        return PreprocessorResult(
-            doc_id=inp.doc_id,
-            requires_chunking=requires_chunking,
-            chunking_strategy=strategy,
-            confidence=0.5,
-            decision_method="heuristic",
-            warnings=warnings,
+        return self._build_result(
+            inp.doc_id, strategy, 0.5, "heuristic", warnings,
         )
 
     def record_outcome(self, outcome: ChunkingOutcome) -> None:

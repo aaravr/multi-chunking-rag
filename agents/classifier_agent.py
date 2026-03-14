@@ -593,10 +593,10 @@ class SGDClassifierWrapper:
         """Retrain SGD from all stored embeddings."""
         if not embedding_store._mem_embeddings or len(self._sgd_classes) < 2:
             return
-        X = np.stack(embedding_store._mem_embeddings)
-        y = embedding_store.mem_labels
+        feature_matrix = np.stack(embedding_store._mem_embeddings)
+        target_labels = embedding_store.mem_labels
         try:
-            self._sgd.partial_fit(X, y, classes=self._sgd_classes)
+            self._sgd.partial_fit(feature_matrix, target_labels, classes=self._sgd_classes)
             self._sgd_fitted = True
             self._sgd_sample_count = len(embedding_store._mem_embeddings)
         except Exception as exc:

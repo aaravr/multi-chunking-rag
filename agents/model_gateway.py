@@ -71,6 +71,18 @@ _MODEL_REGISTRY: Dict[str, RegisteredModel] = {
 }
 
 
+# ── Call Context ──────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class ModelCallContext:
+    """Groups tracing and audit metadata for a single model call."""
+    query_id: str = ""
+    agent_id: str = ""
+    step_id: str = ""
+    user_id: str = ""
+    prompt_template_version: str = ""
+
+
 # ── Circuit Breaker ───────────────────────────────────────────────────
 
 @dataclass
@@ -124,6 +136,7 @@ class ModelGateway:
         step_id: str = "",
         user_id: str = "",
         prompt_template_version: str = "",
+        ctx: Optional[ModelCallContext] = None,
     ) -> Dict[str, Any]:
         """Execute an LLM call through the gateway.
 
@@ -131,7 +144,19 @@ class ModelGateway:
         latency_ms, cost_estimate.
 
         §7.3: Validates registration, enforces circuit breaker, logs everything.
+
+        Pass a ``ModelCallContext`` via *ctx* to group tracing metadata.
+        Individual keyword arguments are kept for backward compatibility.
         """
+        if ctx is None:
+            ctx = ModelCallContext(
+                query_id=query_id,
+                agent_id=agent_id,
+                step_id=step_id,
+                user_id=user_id,
+                prompt_template_version=prompt_template_version,
+            )
+
         reg = self._registry.get(model_id)
         if reg is None:
             raise ValueError(
@@ -147,10 +172,7 @@ class ModelGateway:
                 logger.warning(
                     "Circuit open for %s, falling back to %s", model_id, fallback
                 )
-                return self.call_model(
-                    fallback, messages, temperature,
-                    query_id, agent_id, step_id, user_id, prompt_template_version,
-                )
+                return self.call_model(fallback, messages, temperature, ctx=ctx)
             raise RuntimeError(
                 f"Circuit breaker open for '{model_id}' and no fallback available."
             )
@@ -163,8 +185,8 @@ class ModelGateway:
         try:
             with trace_llm_call(
                 model_id=model_id,
-                agent_id=agent_id,
-                query_id=query_id,
+                agent_id=ctx.agent_id,
+                query_id=ctx.query_id,
                 temperature=temperature,
             ) as span:
                 result = self._execute_openai_call(model_id, messages, temperature)
@@ -180,11 +202,7 @@ class ModelGateway:
                 temperature=temperature,
                 latency_ms=latency_ms,
                 cost_estimate=0.0,
-                query_id=query_id,
-                agent_id=agent_id,
-                step_id=step_id,
-                user_id=user_id,
-                prompt_template_version=prompt_template_version,
+                ctx=ctx,
             )
             raise
 
@@ -217,11 +235,7 @@ class ModelGateway:
             temperature=temperature,
             latency_ms=latency_ms,
             cost_estimate=cost,
-            query_id=query_id,
-            agent_id=agent_id,
-            step_id=step_id,
-            user_id=user_id,
-            prompt_template_version=prompt_template_version,
+            ctx=ctx,
         )
 
         result["latency_ms"] = latency_ms
@@ -288,20 +302,16 @@ class ModelGateway:
         temperature: float,
         latency_ms: float,
         cost_estimate: float,
-        query_id: str,
-        agent_id: str,
-        step_id: str,
-        user_id: str,
-        prompt_template_version: str,
+        ctx: ModelCallContext,
     ) -> None:
         entry = AuditLogEntry(
             log_id=new_id(),
-            query_id=query_id,
-            agent_id=agent_id,
-            step_id=step_id,
+            query_id=ctx.query_id,
+            agent_id=ctx.agent_id,
+            step_id=ctx.step_id,
             event_type="llm_call",
             model_id=model_id,
-            prompt_template_version=prompt_template_version,
+            prompt_template_version=ctx.prompt_template_version,
             full_prompt=full_prompt,
             full_response=full_response,
             input_tokens=input_tokens,
@@ -309,7 +319,7 @@ class ModelGateway:
             temperature=temperature,
             latency_ms=latency_ms,
             cost_estimate=cost_estimate,
-            user_id=user_id,
+            user_id=ctx.user_id,
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
         self._audit_entries.append(entry)
@@ -320,5 +330,5 @@ class ModelGateway:
             output_tokens,
             cost_estimate,
             latency_ms,
-            query_id,
+            ctx.query_id,
         )

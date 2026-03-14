@@ -513,11 +513,55 @@ def _litigation_anchor_phrases() -> List[str]:
     ]
 
 
+def _collect_anchor_rejection_reasons(
+    candidate: RetrievedChunk,
+    combined_text_lower: str,
+    impact_hits: int,
+    is_numeric_list: bool,
+    explicit_note: bool,
+) -> List[str]:
+    """Collect all reasons to reject a candidate anchor chunk.
+
+    Returns an empty list if the candidate should be accepted.
+    """
+    reasons: List[str] = []
+
+    # Items of note (MD&A) ≠ Note 12 (financial statements)
+    is_table_text = candidate.text_content.lstrip().startswith("[TABLE]")
+    if candidate.chunk_type not in {"narrative", "heading"} or is_table_text:
+        reasons.append("reject_chunk_type")
+
+    if not _contains_any_phrase(combined_text_lower, ITEMS_OF_NOTE_PHRASES):
+        reasons.append("missing_positive_phrase")
+
+    if is_numeric_list:
+        if _is_front_matter_reference(combined_text_lower):
+            reasons.append("front_matter_reference")
+        if _is_adjusted_measures_definition(combined_text_lower):
+            reasons.append("reject_adjusted_measures_definition")
+        if not _has_items_of_note_reconciliation_signal(combined_text_lower):
+            reasons.append("missing_reconciliation_signal")
+        if _is_reconciliation_reference_only(combined_text_lower, candidate.text_content):
+            reasons.append("reject_reconciliation_reference_only")
+        if impact_hits < 2 and not _has_aggregate_impact_phrase(combined_text_lower):
+            reasons.append("missing_itemization_or_aggregate")
+
+    if not explicit_note:
+        if any(neg.lower() in combined_text_lower for neg in ITEMS_OF_NOTE_NEGATIVE):
+            reasons.append("negative_phrase")
+        if re.search(r"\bnote\s+\d+\b", combined_text_lower) and not re.search(
+            r"\bitems of note\s+\d+\b", combined_text_lower
+        ):
+            reasons.append("negative_note_reference")
+
+    return reasons
+
+
 def _select_items_of_note_anchor(
     doc_id: str, query: str, decisions: List[Dict[str, object]]
 ) -> List[RetrievedChunk]:
     method = _anchor_method_label()
-    numeric_list = _classify_coverage_type(query) == "numeric_list"
+    is_numeric_list = _classify_coverage_type(query) == "numeric_list"
     if settings.enable_hybrid_retrieval:
         candidates = bm25_heading_anchor_candidates(
             doc_id, ITEMS_OF_NOTE_PHRASES, top_k=25
@@ -527,63 +571,29 @@ def _select_items_of_note_anchor(
             doc_id, ITEMS_OF_NOTE_PHRASES, top_k=25
         )
     explicit_note = _explicit_note_request(query)
+
     for candidate in candidates:
-        reasons = []
-        # Items of note (MD&A) ≠ Note 12 (financial statements) — avoid table/note anchors.
-        is_table_text = candidate.text_content.lstrip().startswith("[TABLE]")
-        if candidate.chunk_type not in {"narrative", "heading"} or is_table_text:
-            reasons.append("reject_chunk_type")
-        text = f"{candidate.heading_path} {candidate.section_id} {candidate.text_content}"
-        lower = text.lower()
+        combined_text = f"{candidate.heading_path} {candidate.section_id} {candidate.text_content}"
+        combined_text_lower = combined_text.lower()
         impact_hits = _count_financial_impact_mentions(candidate.text_content)
-        if not _contains_any_phrase(lower, ITEMS_OF_NOTE_PHRASES):
-            reasons.append("missing_positive_phrase")
-        if numeric_list:
-            if _is_front_matter_reference(lower):
-                reasons.append("front_matter_reference")
-            if _is_adjusted_measures_definition(lower):
-                # Adjusted measures (ratio definitions) ≠ Items of note (MD&A reconciliation) — reject as anchor.
-                reasons.append("reject_adjusted_measures_definition")
-            if not _has_items_of_note_reconciliation_signal(lower):
-                reasons.append("missing_reconciliation_signal")
-            if _is_reconciliation_reference_only(lower, candidate.text_content):
-                # Reconciliation reference ≠ reconciliation disclosure — reject meta anchors.
-                reasons.append("reject_reconciliation_reference_only")
-            if not (
-                impact_hits >= 2
-                or _has_aggregate_impact_phrase(lower)
-            ):
-                reasons.append("missing_itemization_or_aggregate")
-        if not explicit_note:
-            if any(neg.lower() in lower for neg in ITEMS_OF_NOTE_NEGATIVE):
-                reasons.append("negative_phrase")
-            if re.search(r"\bnote\s+\d+\b", lower) and not re.search(
-                r"\bitems of note\s+\d+\b", lower
-            ):
-                reasons.append("negative_note_reference")
-        if reasons:
-            decisions.append(
-                {
-                    "chunk_id": candidate.chunk_id,
-                    "chunk_type": candidate.chunk_type,
-                    "anchor_method": method,
-                    "snippet": text[:120],
-                    "impact_number_hits": impact_hits,
-                    "reasons": reasons,
-                }
-            )
-            continue
-        decisions.append(
-            {
-                "chunk_id": candidate.chunk_id,
-                "chunk_type": candidate.chunk_type,
-                "anchor_method": method,
-                "snippet": text[:120],
-                "impact_number_hits": impact_hits,
-                "reasons": ["accepted"],
-            }
+
+        reasons = _collect_anchor_rejection_reasons(
+            candidate, combined_text_lower, impact_hits, is_numeric_list, explicit_note
         )
-        return [candidate]
+
+        decision_entry = {
+            "chunk_id": candidate.chunk_id,
+            "chunk_type": candidate.chunk_type,
+            "anchor_method": method,
+            "snippet": combined_text[:120],
+            "impact_number_hits": impact_hits,
+            "reasons": reasons or ["accepted"],
+        }
+        decisions.append(decision_entry)
+
+        if not reasons:
+            return [candidate]
+
     return []
 
 

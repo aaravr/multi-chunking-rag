@@ -48,7 +48,7 @@ import numpy as np
 
 from core.config import settings
 from core.contracts import CanonicalPage, CanonicalSpan, ChunkRecord
-from embedding.late_chunking import _classify_chunk_type, _collect_span_lineage
+from embedding.late_chunking import SpanLineage, _classify_chunk_type, _collect_span_lineage
 
 logger = logging.getLogger(__name__)
 
@@ -108,12 +108,25 @@ def _make_chunk_from_multi_page(
     macro_id: int,
     child_id: int,
     embedding: List[float],
+    lineage: Optional[SpanLineage] = None,
+    chunk_type: Optional[str] = None,
+    # Legacy keyword args kept for backward compatibility
     polygons: Optional[List[dict]] = None,
     source_type: str = "native",
     heading_path: str = "",
     section_id: str = "",
-    chunk_type: Optional[str] = None,
 ) -> ChunkRecord:
+    """Build a ChunkRecord spanning multiple pages.
+
+    Prefer passing a ``SpanLineage`` object via *lineage* instead of
+    separate polygon/source/heading/section keyword arguments.
+    """
+    if lineage is not None:
+        polygons = lineage.polygons
+        source_type = lineage.source_type
+        heading_path = lineage.heading_path
+        section_id = lineage.section_id
+
     return ChunkRecord(
         chunk_id=str(uuid.uuid4()),
         doc_id=doc_id,
