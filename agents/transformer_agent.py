@@ -90,10 +90,14 @@ class MCPReferenceClient:
         try:
             with urllib.request.urlopen(req, timeout=self._timeout_s) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
+                canonical = data.get("canonical_value", request.lookup_value)
                 return MCPLookupResponse(
                     lookup_key=data.get("lookup_key", request.lookup_key),
                     original_value=data.get("original_value", request.lookup_value),
-                    canonical_value=data.get("canonical_value", request.lookup_value),
+                    canonical_value=canonical,
+                    code=data.get("code", canonical),
+                    description=data.get("description", canonical),
+                    details=data.get("details", {}),
                     confidence=float(data.get("confidence", 1.0)),
                     source=data.get("source", ""),
                     alternatives=data.get("alternatives", []),

@@ -645,10 +645,18 @@ class MCPLookupResponse:
 
     This is the STANDARD CONTRACT that all team MCP servers must return.
     Teams MUST adhere to this contract even if they implement their own server.
+
+    Every result MUST include code, description, and details:
+    - code: The canonical identifier (e.g. "US", "USD", "RBC")
+    - description: Human-readable label (e.g. "United States", "US Dollar")
+    - details: Additional metadata dict (e.g. {"continent": "North America"})
     """
     lookup_key: str
     original_value: str
     canonical_value: str                 # The normalized/canonical form
+    code: str = ""                       # Canonical code/identifier
+    description: str = ""                # Human-readable description
+    details: Dict[str, Any] = field(default_factory=dict)  # Additional metadata
     confidence: float = 1.0              # How confident the lookup is (1.0 = exact match)
     source: str = ""                     # Where the reference data came from
     alternatives: List[str] = field(default_factory=list)  # Other possible matches

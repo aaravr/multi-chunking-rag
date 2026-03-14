@@ -21,7 +21,10 @@ from agents.transformer_agent import (
 )
 from agents.mcp_reference_server import (
     ReferenceDataStore,
+    ReferenceEntry,
     direct_lookup,
+    direct_list,
+    direct_hierarchical_lookup,
     get_reference_store,
 )
 from agents.message_bus import MessageBus
@@ -105,7 +108,7 @@ def transform_rules():
 def test_reference_store_exact_match():
     store = ReferenceDataStore()
     store.add_reference("entity_name", "Royal Bank of Canada", ["RBC"])
-    canonical, confidence, alternatives, matched = store.lookup("entity_name", "RBC")
+    canonical, confidence, alternatives, matched, entry = store.lookup("entity_name", "RBC")
     assert canonical == "Royal Bank of Canada"
     assert confidence == 0.95
     assert matched is True
@@ -114,15 +117,16 @@ def test_reference_store_exact_match():
 def test_reference_store_no_match():
     store = ReferenceDataStore()
     store.add_reference("entity_name", "Royal Bank of Canada", ["RBC"])
-    canonical, confidence, alternatives, matched = store.lookup("entity_name", "Unknown Corp")
+    canonical, confidence, alternatives, matched, entry = store.lookup("entity_name", "Unknown Corp")
     assert matched is False
     assert confidence == 0.0
+    assert entry is None
 
 
 def test_reference_store_fuzzy_match():
     store = ReferenceDataStore()
     store.add_reference("entity_name", "Royal Bank of Canada", ["Royal Bank"])
-    canonical, confidence, alternatives, matched = store.lookup("entity_name", "Royal Bank Group")
+    canonical, confidence, alternatives, matched, entry = store.lookup("entity_name", "Royal Bank Group")
     assert matched is True
     assert confidence == 0.7
 
@@ -152,6 +156,205 @@ def test_direct_lookup_no_match():
     response = direct_lookup("entity_name", "Completely Unknown Entity XYZ123")
     assert isinstance(response, MCPLookupResponse)
     assert response.matched is False
+
+
+# ── Response Contains code/description/details ───────────────────────
+
+
+def test_response_has_code_description_details():
+    """MCPLookupResponse MUST include code, description, details."""
+    response = direct_lookup("CTRY", "US")
+    assert isinstance(response, MCPLookupResponse)
+    assert response.matched is True
+    assert response.code == "US"
+    assert response.description == "United States"
+    assert isinstance(response.details, dict)
+    assert response.details.get("iso3") == "USA"
+    assert response.details.get("continent") == "North America"
+
+
+def test_response_code_description_for_entity():
+    response = direct_lookup("entity_name", "RBC")
+    assert response.code == "Royal Bank of Canada"
+    assert response.description == "Royal Bank of Canada"
+
+
+def test_response_code_description_for_currency():
+    response = direct_lookup("currency_code", "Euro")
+    assert response.matched is True
+    assert response.code == "EUR"
+    assert response.description == "EUR"  # simple entries use canonical as desc
+
+
+def test_no_match_response_has_empty_details():
+    response = direct_lookup("CTRY", "ZZZZ")
+    assert response.matched is False
+    assert response.details == {}
+
+
+# ── Rich Reference Entry Tests ───────────────────────────────────────
+
+
+def test_rich_entry_fields():
+    entry = ReferenceEntry(
+        code="US",
+        description="United States",
+        details={"iso3": "USA"},
+        aliases=["USA"],
+    )
+    assert entry.code == "US"
+    assert entry.description == "United States"
+    assert entry.details["iso3"] == "USA"
+    assert "USA" in entry.aliases
+
+
+def test_store_rich_entries():
+    store = ReferenceDataStore()
+    entries = [
+        ReferenceEntry(code="X1", description="Entry One", details={"k": "v1"}),
+        ReferenceEntry(code="X2", description="Entry Two", details={"k": "v2"}),
+    ]
+    store.load_rich_entries("TEST_CAT", entries)
+    result = store.list_category("TEST_CAT")
+    assert len(result) == 2
+    codes = {e.code for e in result}
+    assert codes == {"X1", "X2"}
+
+
+# ── Single-Attribute Lookup Tests ────────────────────────────────────
+
+
+def test_direct_list_entity_types():
+    """GET /ENTITY_TYPES — list all entity types."""
+    entries = direct_list("ENTITY_TYPES")
+    assert len(entries) > 0
+    # Each entry must have code, description, details
+    for e in entries:
+        assert "code" in e
+        assert "description" in e
+        assert "details" in e
+    codes = {e["code"] for e in entries}
+    assert "BANK" in codes
+    assert "CORP" in codes
+    assert "REGULATOR" in codes
+
+
+def test_direct_list_countries():
+    """GET /CTRY — list all countries."""
+    entries = direct_list("CTRY")
+    assert len(entries) >= 10
+    codes = {e["code"] for e in entries}
+    assert "US" in codes
+    assert "CA" in codes
+    assert "GB" in codes
+
+
+def test_direct_list_states():
+    """GET /STATE — list all states/provinces."""
+    entries = direct_list("STATE")
+    assert len(entries) >= 10
+    codes = {e["code"] for e in entries}
+    assert "CA" in codes  # California
+    assert "NY" in codes
+    assert "ON" in codes  # Ontario
+
+
+def test_direct_list_cities():
+    """GET /CITY — list all cities."""
+    entries = direct_list("CITY")
+    assert len(entries) >= 10
+    codes = {e["code"] for e in entries}
+    assert "NYC" in codes
+    assert "LON" in codes
+    assert "YTO" in codes
+
+
+def test_direct_list_empty_category():
+    entries = direct_list("NONEXISTENT_CATEGORY")
+    assert entries == []
+
+
+# ── Hierarchical Lookup Tests ────────────────────────────────────────
+
+
+def test_hierarchical_ctry_us_state():
+    """GET /CTRY/US/STATE — states in the US."""
+    entries = direct_hierarchical_lookup("CTRY", "US", "STATE")
+    assert len(entries) >= 5
+    codes = {e["code"] for e in entries}
+    assert "CA" in codes
+    assert "NY" in codes
+    assert "TX" in codes
+    # Each entry must have code, description, details
+    for e in entries:
+        assert "code" in e
+        assert "description" in e
+        assert "details" in e
+
+
+def test_hierarchical_ctry_ca_state():
+    """GET /CTRY/CA/STATE — provinces in Canada."""
+    entries = direct_hierarchical_lookup("CTRY", "CA", "STATE")
+    assert len(entries) >= 3
+    codes = {e["code"] for e in entries}
+    assert "ON" in codes
+    assert "QC" in codes
+    assert "BC" in codes
+
+
+def test_hierarchical_ctry_gb_state():
+    """GET /CTRY/GB/STATE — regions in UK."""
+    entries = direct_hierarchical_lookup("CTRY", "GB", "STATE")
+    assert len(entries) >= 2
+    codes = {e["code"] for e in entries}
+    assert "ENG" in codes
+    assert "SCT" in codes
+
+
+def test_hierarchical_ctry_us_city():
+    """GET /CTRY/US/CITY — cities in the US."""
+    entries = direct_hierarchical_lookup("CTRY", "US", "CITY")
+    assert len(entries) >= 5
+    codes = {e["code"] for e in entries}
+    assert "NYC" in codes
+    assert "LAX" in codes
+    assert "CHI" in codes
+
+
+def test_hierarchical_ctry_ca_city():
+    """GET /CTRY/CA/CITY — cities in Canada."""
+    entries = direct_hierarchical_lookup("CTRY", "CA", "CITY")
+    assert len(entries) >= 3
+    codes = {e["code"] for e in entries}
+    assert "YTO" in codes
+    assert "YMQ" in codes
+
+
+def test_hierarchical_state_ny_city():
+    """GET /STATE/NY/CITY — cities in New York state."""
+    entries = direct_hierarchical_lookup("STATE", "NY", "CITY")
+    assert len(entries) >= 1
+    codes = {e["code"] for e in entries}
+    assert "NYC" in codes
+
+
+def test_hierarchical_state_ca_city():
+    """GET /STATE/CA/CITY — cities in California."""
+    entries = direct_hierarchical_lookup("STATE", "CA", "CITY")
+    codes = {e["code"] for e in entries}
+    assert "LAX" in codes
+    assert "SFO" in codes
+
+
+def test_hierarchical_case_insensitive():
+    """Hierarchical lookup should be case-insensitive."""
+    entries = direct_hierarchical_lookup("ctry", "us", "state")
+    assert len(entries) >= 5
+
+
+def test_hierarchical_no_match():
+    entries = direct_hierarchical_lookup("CTRY", "ZZ", "STATE")
+    assert entries == []
 
 
 # ── Transformer Agent Tests ──────────────────────────────────────────
@@ -264,15 +467,33 @@ def test_mcp_request_contract():
 
 
 def test_mcp_response_contract():
-    """Verify MCPLookupResponse is frozen and has required fields."""
+    """Verify MCPLookupResponse is frozen and has code/description/details."""
     resp = MCPLookupResponse(
         lookup_key="entity_name",
         original_value="RBC",
         canonical_value="Royal Bank of Canada",
+        code="RBC",
+        description="Royal Bank of Canada",
+        details={"sector": "financial_services"},
         confidence=0.95,
         matched=True,
     )
     assert resp.canonical_value == "Royal Bank of Canada"
+    assert resp.code == "RBC"
+    assert resp.description == "Royal Bank of Canada"
+    assert resp.details == {"sector": "financial_services"}
     assert resp.confidence == 0.95
     with pytest.raises(AttributeError):
         resp.canonical_value = "changed"  # type: ignore[misc]
+
+
+def test_mcp_response_defaults():
+    """New fields have sensible defaults for backwards compatibility."""
+    resp = MCPLookupResponse(
+        lookup_key="test",
+        original_value="test",
+        canonical_value="test",
+    )
+    assert resp.code == ""
+    assert resp.description == ""
+    assert resp.details == {}
