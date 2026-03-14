@@ -23,6 +23,7 @@ from agents.contracts import (
 from agents.message_bus import MessageBus
 from agents.model_gateway import ModelGateway
 from agents.prompt_registry import get_template
+from core.chunk_utils import format_sources
 from core.contracts import RetrievedChunk
 
 logger = logging.getLogger(__name__)
@@ -108,7 +109,7 @@ class SynthesiserAgent(BaseAgent):
         if self.gateway is None:
             raise RuntimeError("Model Gateway required for LLM synthesis (§7.3)")
 
-        sources = self._format_sources(chunks)
+        sources = format_sources(chunks)
         user_content = template.user_prompt.format(question=query, sources=sources)
         messages = [
             {"role": "system", "content": template.system_prompt},
@@ -200,13 +201,6 @@ class SynthesiserAgent(BaseAgent):
 
             return deterministic_result
         return None
-
-    def _format_sources(self, chunks: List[RetrievedChunk]) -> str:
-        """Format chunks as numbered sources for the prompt."""
-        lines = []
-        for idx, chunk in enumerate(chunks, start=1):
-            lines.append(f"[C{idx}] {chunk.text_content}")
-        return "\n".join(lines)
 
     def _extract_citations(
         self, answer: str, chunks: List[RetrievedChunk]

@@ -1,6 +1,7 @@
 import re
 from typing import Dict, List, Optional, Tuple
 
+from core.chunk_utils import is_table_chunk, merge_page_lists
 from core.contracts import DocumentFact, RetrievedChunk
 
 FACT_NAMES = [
@@ -42,7 +43,7 @@ def extract_document_facts(doc_id: str, chunks: List[RetrievedChunk]) -> List[Do
                     status="ambiguous",
                     confidence=0.0,
                     source_chunk_id=None,
-                    page_numbers=_merge_pages([entry[1] for entry in found]),
+                    page_numbers=merge_page_lists([entry[1] for entry in found]),
                     polygons=[],
                     evidence_excerpt=None,
                 )
@@ -68,7 +69,7 @@ def extract_document_facts(doc_id: str, chunks: List[RetrievedChunk]) -> List[Do
 def _collect_candidates(chunks: List[RetrievedChunk]) -> Dict[str, List[Tuple[str, RetrievedChunk]]]:
     candidates: Dict[str, List[Tuple[str, RetrievedChunk]]] = {name: [] for name in FACT_NAMES}
     for chunk in chunks:
-        if chunk.chunk_type == "table" or chunk.text_content.lstrip().startswith("[TABLE]"):
+        if is_table_chunk(chunk):
             continue
         text = chunk.text_content
         currency = _match_default_currency(text)
@@ -135,6 +136,3 @@ def _extract_excerpt(text: str) -> str:
     return text.strip().splitlines()[0][:200]
 
 
-def _merge_pages(page_lists: List[List[int]]) -> List[int]:
-    pages = sorted({page for pages in page_lists for page in pages})
-    return pages
