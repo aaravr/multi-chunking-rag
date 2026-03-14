@@ -1,6 +1,13 @@
 """Retraining Agent — triggers model retraining from accumulated feedback (§4.11).
 
-Responsibilities:
+.. deprecated::
+    This module is deprecated in favor of the ``feedback_loop/`` subsystem,
+    which provides structured retraining orchestration with boundary-safe
+    isolation, model lifecycle management (shadow → canary → approved),
+    and evaluation-gated promotion. See ``docs/ENGINEERING_REVIEW.md``
+    Section 4 for migration guidance.
+
+Responsibilities (legacy):
 - Evaluate accumulated feedback to decide if retraining is warranted
 - Retrain classifier's SGDClassifier from embeddings + labels
 - Prune low-accuracy patterns from classifier's PatternStore
@@ -20,6 +27,14 @@ from __future__ import annotations
 
 import logging
 import time
+import warnings
+
+warnings.warn(
+    "agents.retraining_agent is deprecated. Use feedback_loop/ subsystem instead. "
+    "See docs/ENGINEERING_REVIEW.md Section 4 for migration guidance.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 from typing import Any, Dict, List, Optional
 
 from agents.base import BaseAgent

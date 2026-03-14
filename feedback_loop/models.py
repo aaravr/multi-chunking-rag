@@ -95,8 +95,12 @@ class BoundaryKey(BaseModel):
 
     Every feedback event and training row must carry or derive a boundary_key.
     No cross-boundary training data mixing by default.
+
+    The client field is required and must be non-empty. Empty division or
+    jurisdiction fields are allowed but will generate a validation warning
+    in boundary policy enforcement.
     """
-    client: str
+    client: str = Field(..., min_length=1, description="Client identifier (required, non-empty)")
     division: str = ""
     jurisdiction: str = ""
 

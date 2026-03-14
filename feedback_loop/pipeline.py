@@ -14,6 +14,15 @@ from typing import Any, Dict, List, Optional
 
 from feedback_loop.attribution import RuleBasedAttributionEngine
 from feedback_loop.boundary import DefaultBoundaryPolicyGuard
+from feedback_loop.interfaces import (
+    AttributionEngine,
+    BoundaryPolicyGuard,
+    FeedbackIngestionService,
+    FeedbackNormalizer,
+    RetrainingOrchestrator,
+    TraceJoinService,
+    TrainingRowBuilder,
+)
 from feedback_loop.models import (
     DecisionLayer,
     FeedbackAttribution,
@@ -37,11 +46,12 @@ class PipelineResult:
     """Result of processing a single feedback event through the full pipeline."""
     feedback_id: str
     trace_id: str
-    normalized: NormalizedFeedback
-    attribution: FeedbackAttribution
+    normalized: Optional[NormalizedFeedback]
+    attribution: Optional[FeedbackAttribution]
     training_rows: Dict[DecisionLayer, List[Any]]
     rows_submitted: int
     warnings: List[str]
+    quarantined: bool = False
 
 
 class FeedbackLoopPipeline:
@@ -55,17 +65,21 @@ class FeedbackLoopPipeline:
     5. Build (generate layer-specific training rows)
     6. Guard (enforce boundary policies)
     7. Submit (queue rows for retraining)
+
+    If no prediction trace is found, the feedback is stored but quarantined
+    as non-trainable. Quarantined events are preserved for audit and manual
+    remediation but do not generate training rows.
     """
 
     def __init__(
         self,
-        ingestion: Optional[InMemoryFeedbackIngestionService] = None,
-        trace_join: Optional[InMemoryTraceJoinService] = None,
-        normalizer: Optional[DefaultFeedbackNormalizer] = None,
-        attribution: Optional[RuleBasedAttributionEngine] = None,
-        row_builder: Optional[DefaultTrainingRowBuilder] = None,
-        boundary_guard: Optional[DefaultBoundaryPolicyGuard] = None,
-        orchestrator: Optional[InMemoryRetrainingOrchestrator] = None,
+        ingestion: Optional[FeedbackIngestionService] = None,
+        trace_join: Optional[TraceJoinService] = None,
+        normalizer: Optional[FeedbackNormalizer] = None,
+        attribution: Optional[AttributionEngine] = None,
+        row_builder: Optional[TrainingRowBuilder] = None,
+        boundary_guard: Optional[BoundaryPolicyGuard] = None,
+        orchestrator: Optional[RetrainingOrchestrator] = None,
     ) -> None:
         self.ingestion = ingestion or InMemoryFeedbackIngestionService()
         self.trace_join = trace_join or InMemoryTraceJoinService()
@@ -87,13 +101,27 @@ class FeedbackLoopPipeline:
         # 2. Join with trace
         trace = self.trace_join.join(event)
         if trace is None:
-            # Create a minimal trace if none found
-            warnings.append(f"No prediction trace found for feedback {feedback_id}")
-            trace = PredictionTrace(
+            # Quarantine: feedback is stored but marked non-trainable.
+            # No synthetic trace is created — this preserves auditability
+            # and causal correctness. The event can be remediated later
+            # when the prediction trace becomes available.
+            warnings.append(
+                f"No prediction trace found for feedback {feedback_id}. "
+                "Event quarantined as non-trainable."
+            )
+            logger.warning(
+                "Quarantined feedback %s: no prediction trace for query_id=%s, doc_id=%s",
+                feedback_id, event.query_id, event.doc_id,
+            )
+            return PipelineResult(
+                feedback_id=feedback_id,
                 trace_id="",
-                query_id=event.query_id,
-                doc_id=event.doc_id,
-                boundary_key=event.boundary_key,
+                normalized=None,
+                attribution=None,
+                training_rows={},
+                rows_submitted=0,
+                warnings=warnings,
+                quarantined=True,
             )
 
         # 3. Normalize

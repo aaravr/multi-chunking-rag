@@ -4,7 +4,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE TABLE IF NOT EXISTS documents (
     doc_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     filename TEXT NOT NULL,
-    sha256 TEXT NOT NULL,
+    sha256 TEXT NOT NULL UNIQUE,
     page_count INT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

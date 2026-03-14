@@ -1,0 +1,14 @@
+# Optional dependencies for extended backends and features.
+# Install with: pip install -r requirements-optional.txt
+
+# Docling parser backend (PARSER_BACKEND=docling)
+docling
+
+# Multi-format document parsing (ENABLE_MULTI_FORMAT=true)
+python-docx
+openpyxl
+beautifulsoup4
+
+# Feedback loop API server
+fastapi>=0.100.0
+uvicorn>=0.23.0

@@ -54,12 +54,21 @@ ingestion/        Multi-format ingestion pipeline, page triage, canonicalization
   pymupdf_parser.py PyMUPDF parser backend (default)
   docling_parser.py Docling parser backend (optional)
   multi_format_parser.py DOCX, Excel, CSV, JSON, HTML parsers
+feedback_loop/    CANONICAL feedback/retraining subsystem (see §Feedback Architecture below)
+  models.py         Pydantic v2 typed domain models (BoundaryKey, PredictionTrace, TrainingRows)
+  pipeline.py       End-to-end orchestration: Ingest → Join → Normalize → Attribute → Build → Guard → Submit
+  attribution.py    6-rule attribution engine mapping feedback → impacted decision layers
+  training_rows.py  Layer-specific training row builders (planner, classifier, chunking, extraction, calibration)
+  boundary.py       Boundary-safe training isolation: B = (client, division, jurisdiction)
+  interfaces.py     Abstract service interfaces (pluggable backends)
+  services.py       In-memory service implementations (to be replaced with DB-backed)
+  api.py            FastAPI route skeletons for feedback API
 retrieval/        Vector search, BM25 hybrid, intent-based query routing, metadata queries, reranking
 storage/          DB pool, schema, migrations, repository CRUD, schema contract validation
 synthesis/        LLM answer synthesis, coverage extraction, verifier, prompts
 scripts/          Demo/integration scripts
 tests/            Test suite (contracts, bus, gateway, router, agents, schema, routing, coverage, regression)
-docs/             Decision log, traceability matrix, knowledge hardening, work orders
+docs/             Decision log, traceability matrix, knowledge hardening, work orders, engineering review
 ```
 
 ## Key Commands
@@ -132,6 +141,23 @@ Copy `.env.example` to `.env`. Key variables:
 ### Query Intent Types
 - **PoC intents:** `location`, `coverage` (list/attribute/numeric_list/pointer), `semantic`
 - **Enterprise intents:** `comparison`, `multi_hop`, `aggregation`, `metadata`
+
+### Feedback / Retraining Architecture
+
+**Canonical path: `feedback_loop/` subsystem** (migration 009).
+
+The canonical feedback/retraining pipeline is:
+1. **Ingest** — validate + persist feedback event with BoundaryKey
+2. **Join** — link with runtime prediction trace (quarantine if missing)
+3. **Normalize** — derive structured ReasonCodes
+4. **Attribute** — 6-rule engine → impacted DecisionLayers
+5. **Build** — layer-specific TrainingRows (planner, classifier, chunking, extraction, calibration)
+6. **Guard** — boundary validation + cross-boundary sanitization
+7. **Submit** — queue for retraining via RetrainingOrchestrator
+
+**Deprecated:** `agents/feedback_agent.py` and `agents/retraining_agent.py` are deprecated.
+They remain importable for backward compatibility but emit `DeprecationWarning` on import.
+All new feedback/retraining work must use the `feedback_loop/` subsystem.
 
 ## Key Patterns
 

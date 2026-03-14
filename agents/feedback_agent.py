@@ -1,6 +1,19 @@
 """Feedback Agent — collects user feedback and routes it to learning systems (§4.10).
 
-Responsibilities:
+.. deprecated::
+    This module is deprecated in favor of the ``feedback_loop/`` subsystem,
+    which provides multi-layer attribution, boundary-safe training isolation,
+    layer-specific training row generation, and model lifecycle management.
+    See ``docs/ENGINEERING_REVIEW.md`` Section 4 for migration guidance.
+
+    The canonical feedback/retraining architecture is:
+        feedback_loop/pipeline.py  — end-to-end orchestration
+        feedback_loop/models.py    — typed domain models
+        feedback_loop/attribution.py — 6-rule attribution engine
+        feedback_loop/training_rows.py — layer-specific row builders
+        feedback_loop/boundary.py  — boundary-safe isolation
+
+Responsibilities (legacy):
 - Receive user feedback (positive/negative/correction) on query answers
 - Validate and store feedback entries persistently
 - Route feedback to classifier (pattern accuracy), preprocessor (quality scores),
@@ -12,6 +25,15 @@ Message types handled:
 """
 
 from __future__ import annotations
+
+import warnings
+
+warnings.warn(
+    "agents.feedback_agent is deprecated. Use feedback_loop/ subsystem instead. "
+    "See docs/ENGINEERING_REVIEW.md Section 4 for migration guidance.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 import logging
 import threading

@@ -32,10 +32,10 @@ infrastructure**. The six required agents map as follows:
 |---------------------|-------------|----------------------------------------|
 | Orchestrator        | **HAVE**    | `agents/orchestrator_agent.py` — ReAct loop |
 | Classifier          | **HAVE**    | `agents/classifier_agent.py` — 4-tier classification |
-| Data Extractor      | **GAP**     | No schema-driven extraction agent exists |
-| Transformer         | **GAP**     | No reference-data normalization agent exists |
-| Feedback Loop       | **HAVE**    | `agents/feedback_agent.py` — routes feedback to learning systems |
-| Retraining          | **HAVE**    | `agents/retraining_agent.py` — threshold/scheduled/manual triggers |
+| Data Extractor      | **HAVE**    | `agents/extractor_agent.py` — schema-driven field extraction (§10.1) |
+| Transformer         | **HAVE**    | `agents/transformer_agent.py` — MCP reference-data normalization (§10.2) |
+| Feedback Loop       | **HAVE**    | `feedback_loop/` subsystem — canonical multi-layer feedback pipeline (agents/feedback_agent.py is deprecated) |
+| Retraining          | **HAVE**    | `feedback_loop/` subsystem — boundary-safe retraining orchestration (agents/retraining_agent.py is deprecated) |
 
 ### Business Rationale for Closing Gaps
 

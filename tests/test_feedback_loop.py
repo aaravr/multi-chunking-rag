@@ -906,8 +906,8 @@ class TestEndToEndPipeline:
         assert DecisionLayer.EXTRACTION in layers
         assert DecisionLayer.CALIBRATION in layers
 
-    def test_pipeline_no_trace_warning(self, boundary):
-        """If no trace found, pipeline still completes with warning."""
+    def test_pipeline_no_trace_quarantine(self, boundary):
+        """If no trace found, pipeline quarantines feedback as non-trainable."""
         pipeline = FeedbackLoopPipeline()
         event = FeedbackEvent(
             trace_id="nonexistent",
@@ -915,8 +915,13 @@ class TestEndToEndPipeline:
             rating=FeedbackRating.NEGATIVE,
         )
         result = pipeline.process(event)
+        assert result.quarantined is True
+        assert result.rows_submitted == 0
+        assert result.normalized is None
+        assert result.attribution is None
+        assert result.training_rows == {}
         assert len(result.warnings) > 0
-        assert "No prediction trace" in result.warnings[0]
+        assert "quarantined" in result.warnings[0].lower()
 
     def test_pipeline_retraining_trigger(self, trace, boundary):
         """After enough feedback, retraining can be triggered."""

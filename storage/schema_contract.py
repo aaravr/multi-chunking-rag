@@ -18,6 +18,12 @@ REQUIRED_SCHEMA: Dict[str, List[str]] = {
         "embedding_dim",
         "embedding",
         "chunk_type",
+        # Lineage fields — required by §2.1 (Deterministic Lineage invariant)
+        "heading_path",
+        "section_id",
+        # Enterprise classification fields — added by migration 004
+        "document_type",
+        "classification_label",
     ],
     "pages": [
         "doc_id",
@@ -34,6 +40,9 @@ REQUIRED_SCHEMA: Dict[str, List[str]] = {
         "sha256",
         "page_count",
         "created_at",
+        # Enterprise classification fields — added by migration 004
+        "document_type",
+        "classification_label",
     ],
     "document_facts": [
         "doc_id",
