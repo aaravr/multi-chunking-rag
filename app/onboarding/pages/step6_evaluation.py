@@ -3,14 +3,16 @@
 import streamlit as st
 from app.onboarding.mock_data import EVALUATION_PLAN
 from app.onboarding.components.layout import (
-    render_section_header, render_recommendation, render_badge,
-    render_readiness_ring, render_nav_buttons,
+    render_page_title, render_section_header, render_recommendation,
+    render_badge, render_readiness_ring, render_action_bar,
 )
 
 
 def render(current_step: int = 6):
-    st.markdown("## Evaluation Plan")
-    st.markdown('<p style="color:#5D6D7E;font-size:0.85rem;margin-top:-0.5rem">Define quality gates, target deployment mode, evaluation segments, and readiness thresholds.</p>', unsafe_allow_html=True)
+    render_page_title(
+        "Evaluation Plan",
+        "Define quality gates, target deployment mode, evaluation segments, and readiness thresholds.",
+    )
 
     col_main, col_side = st.columns([3, 1])
 
@@ -25,7 +27,7 @@ def render(current_step: int = 6):
                     <div class="mode-icon">{mode['icon']}</div>
                     <div class="mode-title">{mode['label']}</div>
                     <div class="mode-desc">{mode['description']}</div>
-                    <div style="margin-top:0.5rem;font-size:0.7rem;color:#5D6D7E">Min accuracy: {mode['min_accuracy']:.0%}</div>
+                    <div style="margin-top:0.5rem;font-size:0.7rem;color:#64748b">Min accuracy: {mode['min_accuracy']:.0%}</div>
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -44,7 +46,6 @@ def render(current_step: int = 6):
                 badge = render_badge("Fail", "fail")
                 icon = "❌"
 
-            # Format threshold and current
             if gate["threshold"] <= 1.0 and gate["name"] != "Confidence Calibration (ECE)":
                 thresh_str = f"{gate['threshold']:.0%}"
                 curr_str = f"{gate['current']:.0%}"
@@ -79,36 +80,39 @@ def render(current_step: int = 6):
 
         render_section_header("Evaluation Segments")
         for seg in EVALUATION_PLAN["segments"]:
+            slices_html = "".join(
+                f'<span style="background:#f1f5f9;padding:0.2rem 0.6rem;border-radius:4px;font-size:0.72rem;color:#475569">{s}</span>'
+                for s in seg["slices"]
+            )
             st.markdown(f"""
-            <div style="margin-bottom:0.75rem;padding:0.75rem;background:white;border:1px solid #D5D8DC;border-radius:8px">
+            <div style="margin-bottom:0.75rem;padding:0.85rem;background:white;border:1px solid #e2e8f0;border-radius:8px">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem">
-                    <span style="font-weight:600;font-size:0.85rem">{seg['dimension']}</span>
-                    <span style="font-size:0.75rem;color:#5D6D7E">Coverage: {seg['coverage']}</span>
+                    <span style="font-weight:600;font-size:0.85rem;color:#0f172a">{seg['dimension']}</span>
+                    <span style="font-size:0.75rem;color:#64748b">Coverage: {seg['coverage']}</span>
                 </div>
-                <div style="display:flex;gap:0.4rem;flex-wrap:wrap">
-                    {"".join(f'<span style="background:#F4F6F9;padding:0.2rem 0.5rem;border-radius:4px;font-size:0.72rem;color:#2C3E50">{s}</span>' for s in seg['slices'])}
-                </div>
+                <div style="display:flex;gap:0.4rem;flex-wrap:wrap">{slices_html}</div>
             </div>
             """, unsafe_allow_html=True)
 
     with col_side:
         render_readiness_ring(EVALUATION_PLAN["readiness_score"])
-        st.markdown('<p style="text-align:center;font-size:0.8rem;color:#5D6D7E;margin-top:0.5rem">Readiness Score</p>', unsafe_allow_html=True)
-        st.markdown("---")
+        st.markdown(
+            '<p style="text-align:center;font-size:0.8rem;color:#64748b;margin-top:0.5rem">Readiness Score</p>',
+            unsafe_allow_html=True,
+        )
 
         render_recommendation(
             "Target: Shadow Deployment",
             "Based on current quality gate results, the workspace is <strong>ready for Shadow deployment</strong> "
             "(5 of 6 gates passing). The Entity Resolution Rate (87%) is below the 90% threshold — "
-            "this is acceptable for Shadow mode but must be resolved before Canary or Production."
+            "this is acceptable for Shadow mode.",
         )
-        st.markdown("---")
 
         render_recommendation(
             "Segment Coverage",
             "Evaluation covers <strong>3 dimensions</strong> with high slice coverage. "
             "Risk Rating segment coverage (94%) is slightly below 100% — "
-            "the 'Doubtful/Loss' slice has limited sample size (6 documents)."
+            "the 'Doubtful/Loss' slice has limited sample size (6 documents).",
         )
 
-    render_nav_buttons(current_step)
+    render_action_bar(current_step)

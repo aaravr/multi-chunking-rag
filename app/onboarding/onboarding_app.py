@@ -10,11 +10,13 @@ st.set_page_config(
     page_title="IDP Onboarding Studio",
     page_icon="🏢",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 from app.onboarding.components.theme import inject_global_css
-from app.onboarding.components.layout import render_header, render_stepper
+from app.onboarding.components.layout import (
+    render_top_nav, render_breadcrumb, render_sidebar_workspace,
+)
 from app.onboarding.pages import (
     step1_workspace,
     step2_intake,
@@ -49,41 +51,55 @@ if "step" in params:
     except (ValueError, TypeError):
         pass
 
-# ── Sidebar ──────────────────────────────────────────────────────────
+# ── Left Sidebar ─────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### Navigation")
-    st.markdown("---")
+    render_sidebar_workspace()
 
-    st.markdown("**Onboarding Wizard**")
-    step_labels = {
-        1: "1. Workspace Setup",
-        2: "2. Document Intake",
-        3: "3. Task & Schema",
-        4: "4. Ground Truth",
-        5: "5. Pipeline Settings",
-        6: "6. Evaluation Plan",
-        7: "7. Review & Readiness",
-        8: "8. Production Enablement",
+    current = st.session_state.current_step
+
+    # Step badge
+    if st.session_state.view == "wizard":
+        st.markdown(
+            f'<div class="sidebar-step-badge">Step {current}</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            '<div class="sidebar-step-badge" style="background:#16a34a">Live</div>',
+            unsafe_allow_html=True,
+        )
+
+    # Navigation items
+    step_nav = {
+        1: "Workspace",
+        2: "Documents",
+        3: "Schema",
+        4: "Ground Truth",
+        5: "Pipeline",
+        6: "Evaluation",
+        7: "Review",
+        8: "Enablement",
     }
-    for num, label in step_labels.items():
+    for num, label in step_nav.items():
         if st.button(label, key=f"nav_{num}", use_container_width=True):
             st.session_state.current_step = num
             st.session_state.view = "wizard"
             st.rerun()
 
     st.markdown("---")
-    st.markdown("**Operations**")
-    if st.button("📊 Post-Go-Live Monitoring", key="nav_monitoring", use_container_width=True):
+    if st.button("Monitoring", key="nav_monitoring", use_container_width=True):
         st.session_state.view = "monitoring"
         st.rerun()
 
-    st.markdown("---")
     st.markdown(
-        '<div style="font-size:0.72rem;color:#ABB2B9;margin-top:1rem">'
-        "IDP Platform v2.0<br>© 2026 Enterprise Operations"
+        '<div style="font-size:0.7rem;color:#94a3b8;margin-top:2rem;padding:0 0.5rem">'
+        "IDP Platform v2.0<br>Enterprise Operations &copy; 2026"
         "</div>",
         unsafe_allow_html=True,
     )
+
+# ── Top Navigation Bar ───────────────────────────────────────────────
+render_top_nav(active_section="Workspaces")
 
 # ── Page Dispatch ────────────────────────────────────────────────────
 WIZARD_PAGES = {
@@ -97,12 +113,10 @@ WIZARD_PAGES = {
     8: step8_enablement,
 }
 
-render_header()
-
 if st.session_state.view == "monitoring":
     step9_monitoring.render()
 else:
     current = st.session_state.current_step
-    render_stepper(current)
+    render_breadcrumb(current)
     page_module = WIZARD_PAGES.get(current, step1_workspace)
     page_module.render(current_step=current)

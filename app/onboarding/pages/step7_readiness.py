@@ -3,14 +3,17 @@
 import streamlit as st
 from app.onboarding.mock_data import READINESS
 from app.onboarding.components.layout import (
-    render_section_header, render_metric_card, render_recommendation,
-    render_badge, render_readiness_ring, render_nav_buttons,
+    render_page_title, render_section_header, render_metric_card,
+    render_recommendation, render_badge, render_readiness_ring,
+    render_summary_card, render_action_bar,
 )
 
 
 def render(current_step: int = 7):
-    st.markdown("## Review & Readiness")
-    st.markdown('<p style="color:#5D6D7E;font-size:0.85rem;margin-top:-0.5rem">Final readiness assessment — accuracy summary, field-level results, risk review, and sign-off tracking.</p>', unsafe_allow_html=True)
+    render_page_title(
+        "Review & Readiness",
+        "Final readiness assessment — accuracy summary, field-level results, risk review, and sign-off tracking.",
+    )
 
     # Top KPI row
     c1, c2, c3, c4, c5 = st.columns(5)
@@ -33,21 +36,17 @@ def render(current_step: int = 7):
         for f in READINESS["field_results"]:
             acc_pct = f["accuracy"] * 100
             conf_pct = f["confidence"] * 100
-            if f["status"] == "pass":
-                badge = render_badge("Pass", "pass")
-            elif f["status"] == "warn":
-                badge = render_badge("Review", "warn")
-            else:
-                badge = render_badge("Fail", "fail")
-
-            bar_color = "#1E8449" if f["accuracy"] >= 0.90 else "#D4AC0D" if f["accuracy"] >= 0.80 else "#C0392B"
+            badge = render_badge("Pass", "pass") if f["status"] == "pass" else (
+                render_badge("Review", "warn") if f["status"] == "warn" else render_badge("Fail", "fail")
+            )
+            bar_color = "#16a34a" if f["accuracy"] >= 0.90 else "#d97706" if f["accuracy"] >= 0.80 else "#dc2626"
             rows_html += f"""
             <tr>
                 <td style="font-family:monospace;font-size:0.78rem;font-weight:500">{f['field']}</td>
                 <td style="width:160px">
                     <div style="display:flex;align-items:center;gap:0.4rem">
-                        <div style="flex:1;background:#EAECEE;height:8px;border-radius:4px;overflow:hidden">
-                            <div style="width:{acc_pct}%;background:{bar_color};height:100%;border-radius:4px"></div>
+                        <div style="flex:1" class="progress-bar-track">
+                            <div class="progress-bar-fill" style="width:{acc_pct}%;background:{bar_color}"></div>
                         </div>
                         <span style="font-size:0.78rem;font-weight:600;width:42px;text-align:right">{acc_pct:.0f}%</span>
                     </div>
@@ -72,14 +71,15 @@ def render(current_step: int = 7):
 
         render_section_header("Risks & Mitigations")
         for risk in READINESS["risks"]:
-            sev_color = "#D4AC0D" if risk["severity"] == "Medium" else "#ABB2B9"
+            sev_color = "#d97706" if risk["severity"] == "Medium" else "#94a3b8"
+            sev_bg = "#fffbeb" if risk["severity"] == "Medium" else "#f8fafc"
             st.markdown(f"""
-            <div style="padding:0.75rem;margin-bottom:0.5rem;background:white;border:1px solid #D5D8DC;border-left:4px solid {sev_color};border-radius:8px">
+            <div style="padding:0.85rem;margin-bottom:0.5rem;background:{sev_bg};border:1px solid #e2e8f0;border-left:4px solid {sev_color};border-radius:8px">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.3rem">
-                    <span style="font-weight:600;font-size:0.82rem">{risk['severity']} Risk</span>
+                    <span style="font-weight:600;font-size:0.82rem;color:#0f172a">{risk['severity']} Risk</span>
                 </div>
-                <div style="font-size:0.8rem;color:#2C3E50;margin-bottom:0.3rem">{risk['description']}</div>
-                <div style="font-size:0.75rem;color:#1E8449"><strong>Mitigation:</strong> {risk['mitigation']}</div>
+                <div style="font-size:0.8rem;color:#475569;margin-bottom:0.3rem">{risk['description']}</div>
+                <div style="font-size:0.78rem;color:#16a34a"><strong>Mitigation:</strong> {risk['mitigation']}</div>
             </div>
             """, unsafe_allow_html=True)
 
@@ -88,11 +88,11 @@ def render(current_step: int = 7):
             if info["status"] == "approved":
                 icon = "✅"
                 status_text = f"Approved by {info['name']} on {info['date']}"
-                color = "#1E8449"
+                color = "#16a34a"
             else:
                 icon = "⏳"
                 status_text = f"Pending — {info['name']}"
-                color = "#D4AC0D"
+                color = "#d97706"
 
             st.markdown(f"""
             <div class="checklist-item">
@@ -104,8 +104,10 @@ def render(current_step: int = 7):
 
     with col_side:
         render_readiness_ring(READINESS["readiness_score"])
-        st.markdown('<p style="text-align:center;font-size:0.8rem;color:#5D6D7E;margin-top:0.5rem">Overall Readiness</p>', unsafe_allow_html=True)
-        st.markdown("---")
+        st.markdown(
+            '<p style="text-align:center;font-size:0.8rem;color:#64748b;margin-top:0.5rem">Overall Readiness</p>',
+            unsafe_allow_html=True,
+        )
 
         render_recommendation(
             "Readiness Assessment",
@@ -113,21 +115,12 @@ def render(current_step: int = 7):
             f"and <strong>{READINESS['critical_field_accuracy']:.1%} on critical fields</strong>. "
             "All critical field thresholds are met. Shadow deployment is recommended."
         )
-        st.markdown("---")
 
-        st.markdown("""
-        <div class="metric-card">
-            <div class="metric-label">Next Actions</div>
-            <div style="font-size:0.82rem;margin-top:0.5rem">
-                <div style="padding:0.3rem 0;border-bottom:1px solid #EAECEE;color:#2C3E50">1. Obtain compliance sign-off</div>
-                <div style="padding:0.3rem 0;border-bottom:1px solid #EAECEE;color:#2C3E50">2. Obtain technology sign-off</div>
-                <div style="padding:0.3rem 0;border-bottom:1px solid #EAECEE;color:#2C3E50">3. Review entity resolution gap</div>
-                <div style="padding:0.3rem 0;color:#2C3E50">4. Proceed to enablement</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        render_summary_card("Next Actions", [
+            ("1", "Obtain compliance sign-off"),
+            ("2", "Obtain technology sign-off"),
+            ("3", "Review entity resolution gap"),
+            ("4", "Proceed to enablement"),
+        ])
 
-        st.markdown("---")
-        st.button("💾 Save Draft", key="save_draft", use_container_width=True)
-
-    render_nav_buttons(current_step)
+    render_action_bar(current_step)

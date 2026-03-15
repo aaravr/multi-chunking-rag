@@ -3,14 +3,17 @@
 import streamlit as st
 from app.onboarding.mock_data import GROUND_TRUTH
 from app.onboarding.components.layout import (
-    render_section_header, render_metric_card, render_recommendation,
-    render_badge, render_nav_buttons,
+    render_page_title, render_section_header, render_metric_card,
+    render_recommendation, render_badge, render_summary_card,
+    render_action_bar,
 )
 
 
 def render(current_step: int = 4):
-    st.markdown("## Ground Truth & Evaluation Mode")
-    st.markdown('<p style="color:#5D6D7E;font-size:0.85rem;margin-top:-0.5rem">Define how extraction quality will be measured — with labeled ground truth, partial labels, or review-based evaluation.</p>', unsafe_allow_html=True)
+    render_page_title(
+        "Ground Truth & Evaluation Mode",
+        "Define how extraction quality will be measured — with labeled ground truth, partial labels, or review-based evaluation.",
+    )
 
     col_main, col_side = st.columns([3, 1])
 
@@ -50,7 +53,7 @@ def render(current_step: int = 4):
         rows_html = ""
         for fname, info in GROUND_TRUTH["field_coverage"].items():
             pct = info["pct"]
-            bar_color = "#1E8449" if pct >= 90 else "#D4AC0D" if pct >= 60 else "#C0392B"
+            bar_color = "#16a34a" if pct >= 90 else "#d97706" if pct >= 60 else "#dc2626"
             badge = render_badge(f"{pct:.0f}%", "pass" if pct >= 90 else "warn" if pct >= 60 else "fail")
             rows_html += f"""
             <tr>
@@ -58,8 +61,8 @@ def render(current_step: int = 4):
                 <td style="text-align:right">{info['labeled']}</td>
                 <td style="text-align:right">{info['total']}</td>
                 <td style="width:200px">
-                    <div style="background:#EAECEE;height:8px;border-radius:4px;overflow:hidden">
-                        <div style="width:{pct}%;background:{bar_color};height:100%;border-radius:4px"></div>
+                    <div class="progress-bar-track">
+                        <div class="progress-bar-fill" style="width:{pct}%;background:{bar_color}"></div>
                     </div>
                 </td>
                 <td>{badge}</td>
@@ -91,32 +94,21 @@ def render(current_step: int = 4):
             "Partial Ground Truth Strategy",
             "With <strong>20.8% label coverage</strong>, evaluation will use a hybrid approach: "
             "<strong>automated accuracy</strong> on the 142 labeled documents and "
-            "<strong>expert review</strong> on a sampled subset of unlabeled documents. "
-            "Inter-annotator agreement (Cohen's κ) will be measured for review-based evaluation."
+            "<strong>expert review</strong> on a sampled subset of unlabeled documents."
         )
-        st.markdown("---")
+
         render_recommendation(
             "Coverage Gaps",
             "Fields <strong>analyst_name</strong> (31.7%) and <strong>financial_covenant_breach</strong> "
-            "(50.7%) have the lowest label coverage. For these fields, quality assessment will rely "
-            "primarily on expert review with confidence-based sampling."
+            "(50.7%) have the lowest label coverage. Quality assessment will rely primarily on "
+            "expert review with confidence-based sampling.",
+            variant="warning",
         )
-        st.markdown("---")
-        st.markdown("""
-        <div class="metric-card">
-            <div class="metric-label">Evaluation Mix</div>
-            <div style="font-size:0.82rem;margin-top:0.5rem">
-                <div style="display:flex;justify-content:space-between;padding:0.25rem 0;border-bottom:1px solid #EAECEE">
-                    <span style="color:#5D6D7E">Automated (labeled)</span><span style="font-weight:600;color:#1E8449">20.8%</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;padding:0.25rem 0;border-bottom:1px solid #EAECEE">
-                    <span style="color:#5D6D7E">Expert review (sampled)</span><span style="font-weight:600;color:#2874A6">~15%</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;padding:0.25rem 0">
-                    <span style="color:#5D6D7E">Confidence-only</span><span style="font-weight:600;color:#ABB2B9">~64%</span>
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
 
-    render_nav_buttons(current_step)
+        render_summary_card("Evaluation Mix", [
+            ("Automated (labeled)", "20.8%", "#16a34a"),
+            ("Expert review (sampled)", "~15%", "#2563eb"),
+            ("Confidence-only", "~64%", "#94a3b8"),
+        ])
+
+    render_action_bar(current_step)
