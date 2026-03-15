@@ -27,6 +27,7 @@ def main():
     parser.add_argument("--width", type=int, default=1920, help="Viewport width")
     parser.add_argument("--height", type=int, default=1080, help="Viewport height")
     parser.add_argument("--wait", type=float, default=3.0, help="Seconds to wait for page render")
+    parser.add_argument("--chrome-path", default=None, help="Path to Chrome/Chromium executable")
     args = parser.parse_args()
 
     try:
@@ -52,13 +53,16 @@ def main():
     ]
 
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        launch_kwargs = {}
+        if args.chrome_path:
+            launch_kwargs["executable_path"] = args.chrome_path
+        browser = p.chromium.launch(**launch_kwargs)
         page = browser.new_page(viewport={"width": args.width, "height": args.height})
 
         for step_num, name in screens:
             url = f"{args.url}/?step={step_num}"
             print(f"Capturing {name} ({url})...")
-            page.goto(url, wait_until="networkidle")
+            page.goto(url, wait_until="load", timeout=30000)
             time.sleep(args.wait)
 
             # Scroll to top
