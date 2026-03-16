@@ -1,0 +1,533 @@
+# ============================================================
+# Agent Deployments — one per agent type
+# KEDA ScaledObjects manage replica counts; do NOT set replicas here.
+# ============================================================
+
+# ── Router Agent ─────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-router
+  namespace: idp-platform
+  labels: &router-labels
+    app.kubernetes.io/name: agent-router
+    app.kubernetes.io/component: agent
+    app.kubernetes.io/part-of: idp-platform
+    idp/agent-type: router
+spec:
+  # replicas managed by KEDA — omitted intentionally
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-router
+  template:
+    metadata:
+      labels:
+        <<: *router-labels
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: idp-agent
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent
+          image: idp-platform/agent:latest
+          imagePullPolicy: Always
+          args: ["--agent", "router"]
+          envFrom:
+            - configMapRef:
+                name: idp-platform-config
+            - secretRef:
+                name: idp-platform-secrets
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          livenessProbe:
+            exec:
+              command: ["python", "/app/healthcheck.py"]
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command: ["python", "/app/healthcheck.py"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 2
+          startupProbe:
+            exec:
+              command: ["python", "/app/healthcheck.py"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: kafka-tls
+              mountPath: /etc/kafka/tls
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 100Mi
+        - name: kafka-tls
+          secret:
+            secretName: kafka-tls-certs
+            optional: true
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: agent-router
+---
+# ── Retriever Agent ──────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-retriever
+  namespace: idp-platform
+  labels: &retriever-labels
+    app.kubernetes.io/name: agent-retriever
+    app.kubernetes.io/component: agent
+    app.kubernetes.io/part-of: idp-platform
+    idp/agent-type: retriever
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-retriever
+  template:
+    metadata:
+      labels:
+        <<: *retriever-labels
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+    spec:
+      serviceAccountName: idp-agent
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent
+          image: idp-platform/agent:latest
+          imagePullPolicy: Always
+          args: ["--agent", "retriever"]
+          envFrom:
+            - configMapRef:
+                name: idp-platform-config
+            - secretRef:
+                name: idp-platform-secrets
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          livenessProbe:
+            exec:
+              command: ["python", "/app/healthcheck.py"]
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command: ["python", "/app/healthcheck.py"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 2
+          startupProbe:
+            exec:
+              command: ["python", "/app/healthcheck.py"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: kafka-tls
+              mountPath: /etc/kafka/tls
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 200Mi
+        - name: kafka-tls
+          secret:
+            secretName: kafka-tls-certs
+            optional: true
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: agent-retriever
+---
+# ── Synthesiser Agent ────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-synthesiser
+  namespace: idp-platform
+  labels: &synthesiser-labels
+    app.kubernetes.io/name: agent-synthesiser
+    app.kubernetes.io/component: agent
+    app.kubernetes.io/part-of: idp-platform
+    idp/agent-type: synthesiser
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-synthesiser
+  template:
+    metadata:
+      labels:
+        <<: *synthesiser-labels
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+    spec:
+      serviceAccountName: idp-agent
+      terminationGracePeriodSeconds: 90
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent
+          image: idp-platform/agent:latest
+          imagePullPolicy: Always
+          args: ["--agent", "synthesiser"]
+          envFrom:
+            - configMapRef:
+                name: idp-platform-config
+            - secretRef:
+                name: idp-platform-secrets
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          livenessProbe:
+            exec:
+              command: ["python", "/app/healthcheck.py"]
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command: ["python", "/app/healthcheck.py"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 2
+          startupProbe:
+            exec:
+              command: ["python", "/app/healthcheck.py"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: kafka-tls
+              mountPath: /etc/kafka/tls
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 100Mi
+        - name: kafka-tls
+          secret:
+            secretName: kafka-tls-certs
+            optional: true
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: agent-synthesiser
+---
+# ── Verifier Agent ───────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-verifier
+  namespace: idp-platform
+  labels: &verifier-labels
+    app.kubernetes.io/name: agent-verifier
+    app.kubernetes.io/component: agent
+    app.kubernetes.io/part-of: idp-platform
+    idp/agent-type: verifier
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-verifier
+  template:
+    metadata:
+      labels:
+        <<: *verifier-labels
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+    spec:
+      serviceAccountName: idp-agent
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent
+          image: idp-platform/agent:latest
+          imagePullPolicy: Always
+          args: ["--agent", "verifier"]
+          envFrom:
+            - configMapRef:
+                name: idp-platform-config
+            - secretRef:
+                name: idp-platform-secrets
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          livenessProbe:
+            exec:
+              command: ["python", "/app/healthcheck.py"]
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command: ["python", "/app/healthcheck.py"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 2
+          startupProbe:
+            exec:
+              command: ["python", "/app/healthcheck.py"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: kafka-tls
+              mountPath: /etc/kafka/tls
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 100Mi
+        - name: kafka-tls
+          secret:
+            secretName: kafka-tls-certs
+            optional: true
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: agent-verifier
+---
+# ── Streamlit UI ─────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: streamlit-ui
+  namespace: idp-platform
+  labels: &streamlit-labels
+    app.kubernetes.io/name: streamlit-ui
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: idp-platform
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: streamlit-ui
+  template:
+    metadata:
+      labels:
+        <<: *streamlit-labels
+    spec:
+      serviceAccountName: idp-streamlit
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: streamlit
+          image: idp-platform/streamlit:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8501
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: idp-platform-config
+            - secretRef:
+                name: idp-platform-secrets
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          livenessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: streamlit-ui
+---
+# ── Ingestion Worker ─────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingestion-worker
+  namespace: idp-platform
+  labels: &ingestion-labels
+    app.kubernetes.io/name: ingestion-worker
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: idp-platform
+spec:
+  # replicas managed by KEDA — omitted intentionally
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ingestion-worker
+  template:
+    metadata:
+      labels:
+        <<: *ingestion-labels
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+    spec:
+      serviceAccountName: idp-ingestion
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: idp-platform/ingestion:latest
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef:
+                name: idp-platform-config
+            - secretRef:
+                name: idp-platform-secrets
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "4"
+              memory: 4Gi
+          livenessProbe:
+            exec:
+              command: ["python", "/app/healthcheck.py"]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: model-cache
+              mountPath: /app/.cache
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: model-cache
+          emptyDir:
+            sizeLimit: 2Gi

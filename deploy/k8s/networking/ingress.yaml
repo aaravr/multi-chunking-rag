@@ -1,0 +1,46 @@
+# ============================================================
+# Ingress — TLS-terminated entry point for the Streamlit UI
+# Compatible with nginx-ingress, ALB ingress, or Traefik
+# ============================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: idp-platform-ingress
+  namespace: idp-platform
+  labels:
+    app.kubernetes.io/part-of: idp-platform
+  annotations:
+    # nginx-ingress
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/websocket-services: "streamlit-ui"
+    # Rate limiting
+    nginx.ingress.kubernetes.io/limit-rps: "50"
+    nginx.ingress.kubernetes.io/limit-connections: "20"
+    # HSTS
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "Strict-Transport-Security: max-age=31536000; includeSubDomains";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "X-Frame-Options: DENY";
+      more_set_headers "X-XSS-Protection: 1; mode=block";
+    # cert-manager TLS
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - idp.example.com
+      secretName: idp-tls-cert
+  rules:
+    - host: idp.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: streamlit-ui
+                port:
+                  name: http

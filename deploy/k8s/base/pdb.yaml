@@ -1,0 +1,88 @@
+# ============================================================
+# PodDisruptionBudgets — ensure availability during rollouts
+# and node maintenance when KEDA is scaling.
+# ============================================================
+
+# ── Router Agent PDB ─────────────────────────────────────────
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pdb-agent-router
+  namespace: idp-platform
+  labels:
+    app.kubernetes.io/part-of: idp-platform
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-router
+---
+# ── Retriever Agent PDB ─────────────────────────────────────
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pdb-agent-retriever
+  namespace: idp-platform
+  labels:
+    app.kubernetes.io/part-of: idp-platform
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-retriever
+---
+# ── Synthesiser Agent PDB ───────────────────────────────────
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pdb-agent-synthesiser
+  namespace: idp-platform
+  labels:
+    app.kubernetes.io/part-of: idp-platform
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-synthesiser
+---
+# ── Verifier Agent PDB ──────────────────────────────────────
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pdb-agent-verifier
+  namespace: idp-platform
+  labels:
+    app.kubernetes.io/part-of: idp-platform
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-verifier
+---
+# ── Streamlit UI PDB ────────────────────────────────────────
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pdb-streamlit-ui
+  namespace: idp-platform
+  labels:
+    app.kubernetes.io/part-of: idp-platform
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: streamlit-ui
+---
+# ── Ingestion Worker PDB ────────────────────────────────────
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pdb-ingestion-worker
+  namespace: idp-platform
+  labels:
+    app.kubernetes.io/part-of: idp-platform
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ingestion-worker

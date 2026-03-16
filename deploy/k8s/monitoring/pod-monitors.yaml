@@ -1,0 +1,49 @@
+# ============================================================
+# PodMonitors — Prometheus scrape targets for all agents
+# Requires prometheus-operator CRDs
+# ============================================================
+
+# ── Agent PodMonitor (covers all agent deployments) ──────────
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: idp-agents
+  namespace: idp-platform-monitoring
+  labels:
+    app.kubernetes.io/part-of: idp-platform
+    release: prometheus
+spec:
+  namespaceSelector:
+    matchNames:
+      - idp-platform
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: agent
+  podMetricsEndpoints:
+    - port: "9090"
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+      honorLabels: true
+---
+# ── Ingestion Worker PodMonitor ──────────────────────────────
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: idp-ingestion
+  namespace: idp-platform-monitoring
+  labels:
+    app.kubernetes.io/part-of: idp-platform
+    release: prometheus
+spec:
+  namespaceSelector:
+    matchNames:
+      - idp-platform
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ingestion-worker
+  podMetricsEndpoints:
+    - port: "9090"
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s

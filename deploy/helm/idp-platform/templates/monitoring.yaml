@@ -1,0 +1,141 @@
+{{- if .Values.monitoring.enabled }}
+
+{{- if .Values.monitoring.podMonitors }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: idp-agents
+  namespace: {{ .Values.global.namespace }}-monitoring
+  labels:
+    {{- include "idp.labels" . | nindent 4 }}
+    release: prometheus
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ .Values.global.namespace }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: agent
+  podMetricsEndpoints:
+    - port: "9090"
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+      honorLabels: true
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: idp-ingestion
+  namespace: {{ .Values.global.namespace }}-monitoring
+  labels:
+    {{- include "idp.labels" . | nindent 4 }}
+    release: prometheus
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ .Values.global.namespace }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ingestion-worker
+  podMetricsEndpoints:
+    - port: "9090"
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+{{- end }}
+
+{{- if .Values.monitoring.prometheusRules }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: idp-platform-alerts
+  namespace: {{ .Values.global.namespace }}-monitoring
+  labels:
+    {{- include "idp.labels" . | nindent 4 }}
+    release: prometheus
+spec:
+  groups:
+    - name: idp.keda.scaling
+      interval: 30s
+      rules:
+        - alert: KedaScalerErrors
+          expr: |
+            increase(keda_scaler_errors_total{namespace="{{ .Values.global.namespace }}"}[5m]) > 5
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "KEDA scaler errors for {{ "{{ $labels.scaledObject }}" }}"
+        - alert: KedaFallbackActive
+          expr: |
+            keda_scaled_object_fallback_active{namespace="{{ .Values.global.namespace }}"} == 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "KEDA fallback active for {{ "{{ $labels.scaledObject }}" }}"
+
+    - name: idp.kafka.lag
+      interval: 30s
+      rules:
+        - alert: KafkaConsumerLagHigh
+          expr: |
+            kafka_consumer_group_lag{group=~"idp-agent-.*"} > 100
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High Kafka lag for {{ "{{ $labels.group }}" }}"
+        - alert: KafkaConsumerLagCritical
+          expr: |
+            kafka_consumer_group_lag{group=~"idp-agent-.*"} > 1000
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Critical Kafka lag for {{ "{{ $labels.group }}" }}"
+
+    - name: idp.agent.health
+      interval: 30s
+      rules:
+        - alert: AgentDLQGrowing
+          expr: |
+            increase(idp_agent_dlq_total{namespace="{{ .Values.global.namespace }}"}[15m]) > 10
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "DLQ growing for agent {{ "{{ $labels.agent }}" }}"
+        - alert: AgentHighErrorRate
+          expr: |
+            rate(idp_agent_errors_total[5m]) / rate(idp_agent_messages_processed_total[5m]) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Error rate > 5% for agent {{ "{{ $labels.agent }}" }}"
+
+    - name: idp.pods
+      interval: 30s
+      rules:
+        - alert: PodCrashLooping
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="{{ .Values.global.namespace }}"}[1h]) > 3
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Pod {{ "{{ $labels.pod }}" }} crash looping"
+        - alert: PodOOMKilled
+          expr: |
+            kube_pod_container_status_last_terminated_reason{namespace="{{ .Values.global.namespace }}", reason="OOMKilled"} == 1
+          labels:
+            severity: critical
+          annotations:
+            summary: "Pod {{ "{{ $labels.pod }}" }} OOM killed"
+{{- end }}
+
+{{- end }}

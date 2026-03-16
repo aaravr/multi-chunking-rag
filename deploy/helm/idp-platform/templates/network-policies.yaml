@@ -1,0 +1,119 @@
+{{- if .Values.networkPolicies.enabled }}
+# ── Default deny all ─────────────────────────────────────────
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: {{ .Values.global.namespace }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+  namespace: {{ .Values.global.namespace }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+# ── Agent egress: Kafka, PostgreSQL, Redis, LLM APIs, OTel ──
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-agent-egress
+  namespace: {{ .Values.global.namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: agent
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+        - { protocol: TCP, port: 5432 }   # PostgreSQL
+        - { protocol: TCP, port: 6379 }   # Redis
+        - { protocol: TCP, port: 9092 }   # Kafka
+        - { protocol: TCP, port: 443 }    # OpenAI / Azure APIs
+        - { protocol: TCP, port: 8100 }   # MCP reference
+        - { protocol: TCP, port: 4317 }   # OTel collector
+
+# ── Streamlit ingress from nginx-ingress ─────────────────────
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-streamlit-ingress
+  namespace: {{ .Values.global.namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: streamlit-ui
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - { protocol: TCP, port: 8501 }
+
+# ── Streamlit egress ─────────────────────────────────────────
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-streamlit-egress
+  namespace: {{ .Values.global.namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: streamlit-ui
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+        - { protocol: TCP, port: 5432 }
+        - { protocol: TCP, port: 6379 }
+        - { protocol: TCP, port: 9092 }
+        - { protocol: TCP, port: 443 }
+        - { protocol: TCP, port: 8100 }
+        - { protocol: TCP, port: 4317 }
+
+# ── Prometheus scraping ──────────────────────────────────────
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrape
+  namespace: {{ .Values.global.namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: agent
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.global.namespace }}-monitoring
+      ports:
+        - { protocol: TCP, port: 9090 }
+{{- end }}

@@ -1,0 +1,65 @@
+{{- if .Values.streamlit.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: streamlit-ui
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app.kubernetes.io/name: streamlit-ui
+    {{- include "idp.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8501
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: streamlit-ui
+
+{{- if .Values.streamlit.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: idp-platform-ingress
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "idp.labels" . | nindent 4 }}
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/websocket-services: "streamlit-ui"
+    nginx.ingress.kubernetes.io/limit-rps: "50"
+    nginx.ingress.kubernetes.io/limit-connections: "20"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "Strict-Transport-Security: max-age=31536000; includeSubDomains";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "X-Frame-Options: DENY";
+    {{- if .Values.streamlit.ingress.tls.enabled }}
+    cert-manager.io/cluster-issuer: {{ .Values.streamlit.ingress.tls.clusterIssuer }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.streamlit.ingress.className }}
+  {{- if .Values.streamlit.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.streamlit.ingress.host }}
+      secretName: {{ .Values.streamlit.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.streamlit.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: streamlit-ui
+                port:
+                  name: http
+{{- end }}
+{{- end }}

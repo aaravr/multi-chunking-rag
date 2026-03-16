@@ -1,0 +1,186 @@
+# ============================================================
+# PrometheusRules — alerting for KEDA-scaled IDP platform
+# ============================================================
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: idp-platform-alerts
+  namespace: idp-platform-monitoring
+  labels:
+    app.kubernetes.io/part-of: idp-platform
+    release: prometheus
+spec:
+  groups:
+    # ── KEDA Scaling Alerts ────────────────────────────────────
+    - name: idp.keda.scaling
+      interval: 30s
+      rules:
+        - alert: KedaScaledObjectMaxReplicas
+          expr: |
+            keda_scaled_object_is_active{namespace="idp-platform"} == 1
+            and
+            kube_deployment_status_replicas{namespace="idp-platform"}
+            ==
+            kube_deployment_spec_replicas{namespace="idp-platform"}
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "KEDA ScaledObject {{ $labels.scaledObject }} at max replicas"
+            description: >-
+              Deployment {{ $labels.deployment }} has been at maximum replica
+              count for 10 minutes. Consider increasing maxReplicaCount.
+
+        - alert: KedaScalerErrors
+          expr: |
+            increase(keda_scaler_errors_total{namespace="idp-platform"}[5m]) > 5
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "KEDA scaler errors for {{ $labels.scaledObject }}"
+            description: >-
+              KEDA is failing to query scaling metrics for
+              {{ $labels.scaledObject }}. Check Kafka/PostgreSQL connectivity.
+
+        - alert: KedaFallbackActive
+          expr: |
+            keda_scaled_object_is_active{namespace="idp-platform"} == 1
+            and
+            keda_scaled_object_fallback_active{namespace="idp-platform"} == 1
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "KEDA fallback active for {{ $labels.scaledObject }}"
+            description: >-
+              KEDA is using fallback replica count because the scaler
+              is failing. Investigate trigger connectivity.
+
+    # ── Kafka Consumer Lag Alerts ──────────────────────────────
+    - name: idp.kafka.lag
+      interval: 30s
+      rules:
+        - alert: KafkaConsumerLagHigh
+          expr: |
+            kafka_consumer_group_lag{group=~"idp-agent-.*", namespace="idp-platform"} > 100
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "High Kafka lag for {{ $labels.group }} on {{ $labels.topic }}"
+            description: >-
+              Consumer group {{ $labels.group }} has lag > 100 on
+              topic {{ $labels.topic }}. KEDA should be scaling up.
+
+        - alert: KafkaConsumerLagCritical
+          expr: |
+            kafka_consumer_group_lag{group=~"idp-agent-.*", namespace="idp-platform"} > 1000
+          for: 10m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Critical Kafka lag for {{ $labels.group }}"
+            description: >-
+              Consumer group {{ $labels.group }} has lag > 1000 for 10m.
+              This indicates scaling is insufficient or consumers are stuck.
+
+    # ── Agent Health Alerts ────────────────────────────────────
+    - name: idp.agent.health
+      interval: 30s
+      rules:
+        - alert: AgentDLQGrowing
+          expr: |
+            increase(idp_agent_dlq_total{namespace="idp-platform"}[15m]) > 10
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "DLQ growing for agent {{ $labels.agent }}"
+            description: >-
+              Agent {{ $labels.agent }} has routed >10 messages to DLQ
+              in the last 15 minutes. Check for poison pills or schema issues.
+
+        - alert: AgentHighErrorRate
+          expr: |
+            rate(idp_agent_errors_total{namespace="idp-platform"}[5m])
+            /
+            rate(idp_agent_messages_processed_total{namespace="idp-platform"}[5m])
+            > 0.05
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "High error rate for agent {{ $labels.agent }}"
+            description: >-
+              Agent {{ $labels.agent }} error rate is above 5%.
+              Check logs and DLQ for root cause.
+
+        - alert: AgentHighLatency
+          expr: |
+            histogram_quantile(0.99,
+              rate(idp_agent_handler_duration_seconds_bucket{namespace="idp-platform"}[5m])
+            ) > 30
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "High p99 latency for agent {{ $labels.agent }}"
+            description: >-
+              Agent {{ $labels.agent }} p99 latency is above 30s.
+              This may indicate LLM API slowness or resource contention.
+
+    # ── Ingestion Alerts ───────────────────────────────────────
+    - name: idp.ingestion
+      interval: 60s
+      rules:
+        - alert: IngestionQueueBacklog
+          expr: |
+            idp_ingestion_pending_documents > 50
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Ingestion backlog: {{ $value }} documents pending"
+            description: >-
+              There are {{ $value }} documents waiting for ingestion.
+              KEDA should be scaling up ingestion workers.
+
+    # ── Pod Health Alerts ──────────────────────────────────────
+    - name: idp.pods
+      interval: 30s
+      rules:
+        - alert: PodCrashLooping
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="idp-platform"}[1h]) > 3
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Pod {{ $labels.pod }} crash looping"
+            description: >-
+              Pod {{ $labels.pod }} has restarted {{ $value }} times
+              in the last hour.
+
+        - alert: PodOOMKilled
+          expr: |
+            kube_pod_container_status_last_terminated_reason{namespace="idp-platform", reason="OOMKilled"} == 1
+          for: 0m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Pod {{ $labels.pod }} OOM killed"
+            description: >-
+              Container {{ $labels.container }} in pod {{ $labels.pod }}
+              was OOM killed. Increase memory limits.

@@ -1,0 +1,45 @@
+# ============================================================
+# Multi-stage Dockerfile for IDP Agent services
+# Runs any agent via: --agent {router,retriever,synthesiser,verifier}
+# ============================================================
+FROM python:3.11-slim AS base
+
+# Prevent Python from writing .pyc and enable unbuffered stdout
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# OS-level deps (pg_config for psycopg2, gcc for C extensions)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        libpq-dev gcc g++ curl && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# ── Dependency layer (cached unless requirements change) ─────
+FROM base AS deps
+COPY requirements.txt requirements-optional.txt ./
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir kafka-python tenacity cachetools
+
+# ── Application layer ────────────────────────────────────────
+FROM deps AS app
+COPY . .
+
+# Non-root user for security
+RUN groupadd -r idp && useradd -r -g idp -d /app -s /sbin/nologin idp && \
+    chown -R idp:idp /app
+USER idp
+
+# Health check — agent_runner exposes HealthCheck via a tiny HTTP probe
+# The probe script is baked in below
+COPY --chown=idp:idp deploy/docker/healthcheck.py /app/healthcheck.py
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
+    CMD ["python", "/app/healthcheck.py"]
+
+# Default entrypoint — override AGENT_NAME via env or k8s args
+ENV AGENT_NAME=retriever
+ENTRYPOINT ["python", "-m", "agents.agent_runner"]
+CMD ["--agent", "retriever"]

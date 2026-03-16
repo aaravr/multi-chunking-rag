@@ -1,0 +1,31 @@
+# ============================================================
+# Dockerfile for the Ingestion worker service
+# Processes document uploads: PDF parsing, chunking, embedding
+# ============================================================
+FROM python:3.11-slim AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        libpq-dev gcc g++ curl && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# ── Dependencies ─────────────────────────────────────────────
+COPY requirements.txt requirements-optional.txt ./
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir kafka-python tenacity cachetools
+
+# ── Application ──────────────────────────────────────────────
+COPY . .
+
+RUN groupadd -r idp && useradd -r -g idp -d /app -s /sbin/nologin idp && \
+    chown -R idp:idp /app
+USER idp
+
+# Ingestion is CPU-bound (embedding model). No GPU required.
+ENTRYPOINT ["python", "-m", "ingestion.worker"]

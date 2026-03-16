@@ -1,0 +1,174 @@
+{{/*
+KEDA ScaledObjects for each enabled agent — Kafka consumer lag trigger.
+*/}}
+{{- if .Values.keda.enabled }}
+
+# ── TriggerAuthentications ───────────────────────────────────
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: kafka-sasl-auth
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "idp.labels" . | nindent 4 }}
+spec:
+  secretTargetRef:
+    - parameter: sasl
+      name: idp-platform-secrets
+      key: KAFKA_SASL_USERNAME
+    - parameter: password
+      name: idp-platform-secrets
+      key: KAFKA_SASL_PASSWORD
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: postgres-auth
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "idp.labels" . | nindent 4 }}
+spec:
+  secretTargetRef:
+    - parameter: connection
+      name: idp-platform-secrets
+      key: DATABASE_URL
+
+# ── Agent ScaledObjects ──────────────────────────────────────
+{{- range $name, $agent := .Values.agents }}
+{{- if $agent.enabled }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: keda-agent-{{ $name }}
+  namespace: {{ $.Values.global.namespace }}
+  labels:
+    app.kubernetes.io/name: agent-{{ $name }}
+    app.kubernetes.io/component: keda
+    {{- include "idp.labels" $ | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: agent-{{ $name }}
+  pollingInterval: {{ $agent.scaling.pollingInterval }}
+  cooldownPeriod: {{ $agent.scaling.cooldownPeriod }}
+  idleReplicaCount: {{ $agent.scaling.idleReplicaCount }}
+  minReplicaCount: {{ $agent.scaling.minReplicaCount }}
+  maxReplicaCount: {{ $agent.scaling.maxReplicaCount }}
+  fallback:
+    failureThreshold: 3
+    replicas: {{ $agent.scaling.fallbackReplicas }}
+  advanced:
+    restoreToOriginalReplicaCount: false
+    horizontalPodAutoscalerConfig:
+      name: keda-hpa-agent-{{ $name }}
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: {{ $agent.scaling.scaleUp.stabilizationWindowSeconds }}
+          policies:
+            - type: Pods
+              value: {{ $agent.scaling.scaleUp.maxPodsPerMinute }}
+              periodSeconds: 60
+            - type: Percent
+              value: 100
+              periodSeconds: 60
+          selectPolicy: Max
+        scaleDown:
+          stabilizationWindowSeconds: {{ $agent.scaling.scaleDown.stabilizationWindowSeconds }}
+          policies:
+            - type: Pods
+              value: {{ $agent.scaling.scaleDown.maxPodsPerMinute }}
+              periodSeconds: 120
+          selectPolicy: Min
+  triggers:
+    - type: kafka
+      authenticationRef:
+        name: kafka-sasl-auth
+      metadata:
+        bootstrapServers: {{ $.Values.kafka.bootstrapServers }}
+        consumerGroup: {{ include "idp.consumerGroup" $name }}
+        topic: {{ include "idp.kafkaTopic" $name }}
+        lagThreshold: {{ $agent.scaling.lagThreshold | quote }}
+        activationLagThreshold: {{ $agent.scaling.activationLagThreshold | quote }}
+        offsetResetPolicy: earliest
+        allowIdleConsumers: "true"
+        scaleToZeroOnInvalidOffset: "false"
+        {{- if $.Values.kafka.tls.enabled }}
+        tls: "enable"
+        {{- end }}
+        {{- if $.Values.kafka.saslMechanism }}
+        sasl: {{ $.Values.kafka.saslMechanism | lower | replace "-" "_" | quote }}
+        {{- end }}
+{{- end }}
+{{- end }}
+
+# ── Ingestion Worker ScaledObject ────────────────────────────
+{{- if .Values.ingestion.enabled }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: keda-ingestion-worker
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app.kubernetes.io/name: ingestion-worker
+    app.kubernetes.io/component: keda
+    {{- include "idp.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: ingestion-worker
+  pollingInterval: {{ .Values.ingestion.scaling.pollingInterval }}
+  cooldownPeriod: {{ .Values.ingestion.scaling.cooldownPeriod }}
+  idleReplicaCount: {{ .Values.ingestion.scaling.idleReplicaCount }}
+  minReplicaCount: {{ .Values.ingestion.scaling.minReplicaCount }}
+  maxReplicaCount: {{ .Values.ingestion.scaling.maxReplicaCount }}
+  fallback:
+    failureThreshold: 3
+    replicas: {{ .Values.ingestion.scaling.fallbackReplicas }}
+  advanced:
+    restoreToOriginalReplicaCount: false
+    horizontalPodAutoscalerConfig:
+      name: keda-hpa-ingestion-worker
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: {{ .Values.ingestion.scaling.scaleUp.stabilizationWindowSeconds }}
+          policies:
+            - type: Pods
+              value: {{ .Values.ingestion.scaling.scaleUp.maxPodsPerMinute }}
+              periodSeconds: 120
+          selectPolicy: Max
+        scaleDown:
+          stabilizationWindowSeconds: {{ .Values.ingestion.scaling.scaleDown.stabilizationWindowSeconds }}
+          policies:
+            - type: Pods
+              value: {{ .Values.ingestion.scaling.scaleDown.maxPodsPerMinute }}
+              periodSeconds: 300
+          selectPolicy: Min
+  triggers:
+    - type: kafka
+      authenticationRef:
+        name: kafka-sasl-auth
+      metadata:
+        bootstrapServers: {{ .Values.kafka.bootstrapServers }}
+        consumerGroup: idp-ingestion-worker
+        topic: ingestion.documents.pending
+        lagThreshold: {{ .Values.ingestion.scaling.kafkaLagThreshold | quote }}
+        activationLagThreshold: "1"
+        offsetResetPolicy: earliest
+        allowIdleConsumers: "true"
+        scaleToZeroOnInvalidOffset: "false"
+        {{- if .Values.kafka.tls.enabled }}
+        tls: "enable"
+        {{- end }}
+        {{- if .Values.kafka.saslMechanism }}
+        sasl: {{ .Values.kafka.saslMechanism | lower | replace "-" "_" | quote }}
+        {{- end }}
+    - type: postgresql
+      authenticationRef:
+        name: postgres-auth
+      metadata:
+        targetQueryValue: {{ .Values.ingestion.scaling.postgresQueryValue | quote }}
+        activationTargetQueryValue: "1"
+        query: "SELECT COUNT(*) FROM documents WHERE processing_status = 'pending'"
+{{- end }}
+
+{{- end }}
