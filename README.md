@@ -43,7 +43,7 @@ python storage/setup_db.py
 ### Run
 
 ```bash
-streamlit run app/poc_app.py
+streamlit run app/app.py
 ```
 
 ### Test

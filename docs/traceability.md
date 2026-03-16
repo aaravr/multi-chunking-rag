@@ -125,10 +125,10 @@ HNSW + B-tree indexes	§7.2	migrations	Index existence	Planned
 
 Requirement	Spec Ref	Impl	Tests	Status
 Lineage-rich retrieval	§8.1	retrieval/	Retrieval tests	Planned
-Document metadata shortcut	§8.1	retrieval/metadata.py; app/poc_app.py	tests/test_document_facts.py	In-Progress
+Document metadata shortcut	§8.1	retrieval/metadata.py; app/app.py	tests/test_document_facts.py	In-Progress
 LLM constrained to evidence	§8.2	synthesis/prompt	Hallucination test	Planned
 Items-of-note numeric_list anchor hardening	§8.1	retrieval/router.py	tests/test_items_of_note_anchor_not_adjusted_measures.py; tests/test_items_of_note_anchor_rejects_reconciliation_reference_only.py	Complete
-BM25 index caching for hybrid retrieval	§8.1	retrieval/bm25_index.py; retrieval/hybrid.py; app/poc_app.py	tests/test_bm25_index_manager.py	Complete
+BM25 index caching for hybrid retrieval	§8.1	retrieval/bm25_index.py; retrieval/hybrid.py; app/app.py	tests/test_bm25_index_manager.py	Complete
 
 
 ⸻
@@ -176,7 +176,7 @@ SPEC wins on conflict	PR review gate	Enforced
 SPEC ADDENDUM TRACEABILITY
 
 Addendum Requirement	Addendum Ref	Impl	Tests	Status
-Query intent routing + subtypes (list/attribute/numeric_list/pointer)	A1	retrieval/router.py; synthesis/openai_client.py; app/poc_app.py	tests/test_coverage_query.py; tests/test_router_intent_subtypes.py; tests/test_pointer_query_note_reference.py; tests/test_coverage_attribute_range_losses.py	Complete
+Query intent routing + subtypes (list/attribute/numeric_list/pointer)	A1	retrieval/router.py; synthesis/openai_client.py; app/app.py	tests/test_coverage_query.py; tests/test_router_intent_subtypes.py; tests/test_pointer_query_note_reference.py; tests/test_coverage_attribute_range_losses.py	Complete
 Page-filtered retrieval	A1	retrieval/vector_search.py	Page query test	Complete
 Section expansion (Locate → Then Read)	A1	retrieval/router.py; retrieval/vector_search.py	tests/test_closed_matters_plan.py; tests/test_coverage_query_integration.py	Complete
 heading_path persistence	A2	canonicalization	tests/test_coverage_query_integration.py	Complete

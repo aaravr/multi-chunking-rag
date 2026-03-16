@@ -45,7 +45,7 @@ agents/           Enterprise agent framework (MASTER_PROMPT §4-§5)
   extractor_agent.py Schema-driven field extraction (§10.1)
   transformer_agent.py Value normalization via MCP (§10.2)
   mcp_reference_server.py MCP reference data server (§10.3)
-app/              Streamlit UI (poc_app.py)
+app/              Streamlit UI (app.py)
 core/             Config (config.py), contracts (contracts.py), logging
 embedding/        Late chunking (late_chunking.py), ModernBERT embedder, model registry singleton
 grounding/        PDF highlight annotations from chunk polygons
@@ -83,7 +83,7 @@ export TEST_DATABASE_URL=postgresql://user:pass@localhost/test_db
 pytest tests/ -v
 
 # Run the app
-streamlit run app/poc_app.py
+streamlit run app/app.py
 ```
 
 ## Environment Variables
