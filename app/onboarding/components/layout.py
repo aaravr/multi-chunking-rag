@@ -43,7 +43,7 @@ def render_breadcrumb(current_step: int):
     for i, step in enumerate(WIZARD_STEPS):
         n = step["number"]
         if i > 0:
-            html += '<span class="bc-separator">&#8250;</span>'
+            html += '<span class="bc-separator">&middot;</span>'
 
         if n < current_step:
             html += f'''<span class="bc-step completed">

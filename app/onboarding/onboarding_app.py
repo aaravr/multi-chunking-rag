@@ -10,14 +10,14 @@ st.set_page_config(
     page_title="IDP Onboarding Studio",
     page_icon="🏢",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 from app.onboarding.components.theme import inject_global_css
 from app.onboarding.components.layout import (
     render_top_nav, render_breadcrumb, render_sidebar_workspace,
 )
-from app.onboarding.pages import (
+from app.onboarding.views import (
     step1_workspace,
     step2_intake,
     step3_schema,
@@ -51,53 +51,6 @@ if "step" in params:
     except (ValueError, TypeError):
         pass
 
-# ── Left Sidebar ─────────────────────────────────────────────────────
-with st.sidebar:
-    render_sidebar_workspace()
-
-    current = st.session_state.current_step
-
-    # Step badge
-    if st.session_state.view == "wizard":
-        st.markdown(
-            f'<div class="sidebar-step-badge">Step {current}</div>',
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            '<div class="sidebar-step-badge" style="background:#16a34a">Live</div>',
-            unsafe_allow_html=True,
-        )
-
-    # Navigation items
-    step_nav = {
-        1: "Workspace",
-        2: "Documents",
-        3: "Schema",
-        4: "Ground Truth",
-        5: "Pipeline",
-        6: "Evaluation",
-        7: "Review",
-        8: "Enablement",
-    }
-    for num, label in step_nav.items():
-        if st.button(label, key=f"nav_{num}", use_container_width=True):
-            st.session_state.current_step = num
-            st.session_state.view = "wizard"
-            st.rerun()
-
-    st.markdown("---")
-    if st.button("Monitoring", key="nav_monitoring", use_container_width=True):
-        st.session_state.view = "monitoring"
-        st.rerun()
-
-    st.markdown(
-        '<div style="font-size:0.7rem;color:#94a3b8;margin-top:2rem;padding:0 0.5rem">'
-        "IDP Platform v2.0<br>Enterprise Operations &copy; 2026"
-        "</div>",
-        unsafe_allow_html=True,
-    )
-
 # ── Top Navigation Bar ───────────────────────────────────────────────
 render_top_nav(active_section="Workspaces")
 
@@ -117,6 +70,54 @@ if st.session_state.view == "monitoring":
     step9_monitoring.render()
 else:
     current = st.session_state.current_step
-    render_breadcrumb(current)
-    page_module = WIZARD_PAGES.get(current, step1_workspace)
-    page_module.render(current_step=current)
+
+    # ── 3-column layout: sidebar nav | breadcrumb + content | (built into content) ──
+    sidebar_col, content_col = st.columns([1, 5])
+
+    with sidebar_col:
+        render_sidebar_workspace()
+
+        if st.session_state.view == "wizard":
+            st.markdown(
+                f'<div class="sidebar-step-badge">Step {current}</div>',
+                unsafe_allow_html=True,
+            )
+
+        step_nav = {
+            1: "Workspace",
+            2: "Documents",
+            3: "Schema",
+            4: "Ground Truth",
+            5: "Pipeline",
+            6: "Evaluation",
+            7: "Review",
+            8: "Enablement",
+        }
+        for num, label in step_nav.items():
+            is_active = (num == current)
+            if st.button(label, key=f"nav_{num}", use_container_width=True,
+                         type="primary" if is_active else "secondary"):
+                st.session_state.current_step = num
+                st.session_state.view = "wizard"
+                st.rerun()
+
+        st.markdown('<div style="height:0.5rem"></div>', unsafe_allow_html=True)
+        if st.button("Monitoring", key="nav_monitoring", use_container_width=True):
+            st.session_state.view = "monitoring"
+            st.rerun()
+
+        # Progress indicator
+        st.markdown(f"""
+        <div style="margin-top:1.5rem;padding:0 0.25rem">
+            <div style="font-size:0.68rem;color:#94a3b8;margin-bottom:0.3rem">PROGRESS</div>
+            <div class="progress-bar-track" style="height:6px">
+                <div class="progress-bar-fill" style="width:{int((current/8)*100)}%;background:#3b82f6"></div>
+            </div>
+            <div style="font-size:0.68rem;color:#94a3b8;margin-top:0.2rem">{current} of 8 steps</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with content_col:
+        render_breadcrumb(current)
+        page_module = WIZARD_PAGES.get(current, step1_workspace)
+        page_module.render(current_step=current)
