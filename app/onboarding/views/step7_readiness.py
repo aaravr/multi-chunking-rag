@@ -116,11 +116,11 @@ def render(current_step: int = 7):
         render_section_header("Sign-Off Tracking")
         for role, info in READINESS["sign_off"].items():
             if info["status"] == "approved":
-                icon = "✅"
+                icon = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" stroke="#16a34a" stroke-width="1.4"/><polyline points="4,7 6,9.5 10,4.5" stroke="#16a34a" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>'
                 status_text = f"Approved by {info['name']} on {info['date']}"
                 color = "#16a34a"
             else:
-                icon = "⏳"
+                icon = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" stroke="#d97706" stroke-width="1.4" stroke-dasharray="3 2"/><circle cx="7" cy="7" r="1" fill="#d97706"/><line x1="7" y1="4" x2="7" y2="7" stroke="#d97706" stroke-width="1.2" stroke-linecap="round"/></svg>'
                 status_text = f"Pending — {info['name']}"
                 color = "#d97706"
 

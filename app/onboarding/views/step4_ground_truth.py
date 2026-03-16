@@ -21,9 +21,9 @@ def render(current_step: int = 4):
         render_section_header("Evaluation Mode")
         c1, c2, c3 = st.columns(3)
         gt_modes = [
-            ("📊", "Full Ground Truth", "Complete labeled dataset for all fields and documents. Enables automated accuracy measurement.", False),
-            ("📋", "Partial Ground Truth", "Labels available for a subset of documents or fields. Combines automated + review-based evaluation.", True),
-            ("👁️", "No Ground Truth", "No pre-existing labels. Quality assessed through expert review and inter-annotator agreement.", False),
+            ('<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="2" y="2" width="16" height="16" rx="2" stroke="#666" stroke-width="1.4"/><polyline points="5,12 8,7 11,10 15,5" stroke="#666" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>', "Full Ground Truth", "Complete labeled dataset for all fields and documents. Enables automated accuracy measurement.", False),
+            ('<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="2" y="2" width="16" height="16" rx="2" stroke="#666" stroke-width="1.4"/><rect x="2" y="2" width="8" height="16" rx="1" fill="#666" opacity="0.15"/><line x1="6" y1="7" x2="6" y2="13" stroke="#666" stroke-width="1.2"/><line x1="14" y1="7" x2="14" y2="13" stroke="#666" stroke-width="1.2" stroke-dasharray="2 2"/></svg>', "Partial Ground Truth", "Labels available for a subset of documents or fields. Combines automated + review-based evaluation.", True),
+            ('<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="2" y="2" width="16" height="16" rx="2" stroke="#666" stroke-width="1.4"/><line x1="6" y1="7" x2="14" y2="7" stroke="#666" stroke-width="1.2" stroke-dasharray="2 2"/><line x1="6" y1="10" x2="14" y2="10" stroke="#666" stroke-width="1.2" stroke-dasharray="2 2"/><line x1="6" y1="13" x2="14" y2="13" stroke="#666" stroke-width="1.2" stroke-dasharray="2 2"/></svg>', "No Ground Truth", "No pre-existing labels. Quality assessed through expert review and inter-annotator agreement.", False),
         ]
         for col, (icon, title, desc, selected) in zip([c1, c2, c3], gt_modes):
             with col:

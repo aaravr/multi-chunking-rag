@@ -114,10 +114,10 @@ def render():
         for alert in MONITORING["alerts"]:
             if alert["severity"] == "warning":
                 alert_cls = "warning"
-                icon = "⚠️"
+                icon = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1.5 L13 12 H1 Z" stroke="#d97706" stroke-width="1.3" fill="none" stroke-linejoin="round"/><line x1="7" y1="5.5" x2="7" y2="8.5" stroke="#d97706" stroke-width="1.2" stroke-linecap="round"/><circle cx="7" cy="10" r="0.6" fill="#d97706"/></svg>'
             else:
                 alert_cls = "info"
-                icon = "ℹ️"
+                icon = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" stroke="#666" stroke-width="1.3"/><line x1="7" y1="6.5" x2="7" y2="10" stroke="#666" stroke-width="1.2" stroke-linecap="round"/><circle cx="7" cy="4.5" r="0.7" fill="#666"/></svg>'
 
             ack_badge = render_badge("Acknowledged", "pass") if alert["acknowledged"] else render_badge("New", "warn")
             st.markdown(f"""

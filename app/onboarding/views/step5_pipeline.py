@@ -25,7 +25,12 @@ def render(current_step: int = 5):
         for col, (key, prof) in zip([c1, c2, c3], profiles.items()):
             with col:
                 cls = "selected" if key == selected else ""
-                icon = "⭐" if key == "recommended" else "⚖️" if key == "balanced" else "🎯"
+                icon = ('<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 3 L12 8 L17 8.5 L13.5 12 L14.5 17 L10 14.5 L5.5 17 L6.5 12 L3 8.5 L8 8 Z" stroke="#666" stroke-width="1.3" fill="none" stroke-linejoin="round"/></svg>'
+                    if key == "recommended"
+                    else '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="3" y="3" width="14" height="14" rx="2" stroke="#666" stroke-width="1.4"/><line x1="10" y1="5" x2="10" y2="15" stroke="#666" stroke-width="1.2"/><line x1="5" y1="10" x2="15" y2="10" stroke="#666" stroke-width="1.2"/></svg>'
+                    if key == "balanced"
+                    else '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="#666" stroke-width="1.4"/><circle cx="10" cy="10" r="4" stroke="#666" stroke-width="1.2"/><circle cx="10" cy="10" r="1.2" fill="#666"/></svg>'
+                )
                 st.markdown(f"""
                 <div class="mode-card {cls}" style="text-align:left;min-height:180px">
                     <div class="mode-icon">{icon}</div>

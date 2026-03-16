@@ -20,10 +20,10 @@ def render(current_step: int = 3):
         render_section_header("Task Mode")
         c1, c2, c3, c4 = st.columns(4)
         modes = [
-            ("📋", "Classify", "Categorize documents by type and subtype", False),
-            ("🔍", "Extract Fields", "Extract structured fields from documents", True),
-            ("✓", "Validate Fields", "Verify pre-extracted values against source", False),
-            ("⇄", "Compare", "Compare field values across document versions", False),
+            ('<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="2" y="2" width="16" height="16" rx="2" stroke="#666" stroke-width="1.4"/><line x1="6" y1="7" x2="14" y2="7" stroke="#666" stroke-width="1.2"/><line x1="6" y1="10" x2="14" y2="10" stroke="#666" stroke-width="1.2"/><line x1="6" y1="13" x2="10" y2="13" stroke="#666" stroke-width="1.2"/></svg>', "Classify", "Categorize documents by type and subtype", False),
+            ('<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="8.5" cy="8.5" r="5.5" stroke="#666" stroke-width="1.4"/><line x1="12.5" y1="12.5" x2="17" y2="17" stroke="#666" stroke-width="1.6" stroke-linecap="round"/></svg>', "Extract Fields", "Extract structured fields from documents", True),
+            ('<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><polyline points="4,10 8,14 16,6" stroke="#666" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>', "Validate Fields", "Verify pre-extracted values against source", False),
+            ('<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><line x1="5" y1="7" x2="15" y2="7" stroke="#666" stroke-width="1.4"/><line x1="5" y1="13" x2="15" y2="13" stroke="#666" stroke-width="1.4"/><polyline points="12,5 15,7 12,9" stroke="#666" stroke-width="1.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><polyline points="8,11 5,13 8,15" stroke="#666" stroke-width="1.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>', "Compare", "Compare field values across document versions", False),
         ]
         for col, (icon, title, desc, selected) in zip([c1, c2, c3, c4], modes):
             with col:
@@ -50,7 +50,7 @@ def render(current_step: int = 3):
             }.get(f["criticality"], "pending")
             crit_badge = render_badge(f["criticality"], crit_variant)
             req = "✓" if f["required"] else "—"
-            ref = '<span style="color:#E60000">🔗</span>' if f["reference_resolver"] else ""
+            ref = '<span style="color:#E60000;font-size:0.8rem;font-weight:600">REF</span>' if f["reference_resolver"] else ""
             rows_html += f"""
             <tr>
                 <td style="font-weight:500;font-family:monospace;font-size:0.78rem">{f['name']}</td>

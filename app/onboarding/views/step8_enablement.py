@@ -50,10 +50,10 @@ def render(current_step: int = 8):
             )
             for item in items:
                 if item["status"] == "complete":
-                    icon = "✅"
+                    icon = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1" y="1" width="12" height="12" rx="2" stroke="#16a34a" stroke-width="1.4"/><polyline points="4,7 6,9.5 10,4.5" stroke="#16a34a" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>'
                     color = "#000000"
                 else:
-                    icon = "⏳"
+                    icon = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1" y="1" width="12" height="12" rx="2" stroke="#d97706" stroke-width="1.4" stroke-dasharray="3 2"/></svg>'
                     color = "#d97706"
                 st.markdown(f"""
                 <div class="checklist-item">
@@ -92,7 +92,7 @@ def render(current_step: int = 8):
         total_count = len(ENABLEMENT["checklist"])
 
         if complete_count < total_count:
-            st.warning(f"⚠️ {total_count - complete_count} checklist items pending. Resolve all items before enabling deployment.")
+            st.warning(f"{total_count - complete_count} checklist items pending. Resolve all items before enabling deployment.")
 
         c1, c2, c3 = st.columns([1, 2, 1])
         with c2:

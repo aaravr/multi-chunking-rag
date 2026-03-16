@@ -39,13 +39,13 @@ def render(current_step: int = 6):
         for gate in EVALUATION_PLAN["quality_gates"]:
             if gate["status"] == "pass":
                 badge = render_badge("Pass", "pass")
-                icon = "✅"
+                icon = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="#16a34a" stroke-width="1.5"/><polyline points="5,8 7,10.5 11,5.5" stroke="#16a34a" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>'
             elif gate["status"] == "warn":
                 badge = render_badge("Warning", "warn")
-                icon = "⚠️"
+                icon = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2 L14.5 13 H1.5 Z" stroke="#d97706" stroke-width="1.4" fill="none" stroke-linejoin="round"/><line x1="8" y1="6.5" x2="8" y2="9.5" stroke="#d97706" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="11.2" r="0.7" fill="#d97706"/></svg>'
             else:
                 badge = render_badge("Fail", "fail")
-                icon = "❌"
+                icon = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="#dc2626" stroke-width="1.5"/><line x1="5.5" y1="5.5" x2="10.5" y2="10.5" stroke="#dc2626" stroke-width="1.5" stroke-linecap="round"/><line x1="10.5" y1="5.5" x2="5.5" y2="10.5" stroke="#dc2626" stroke-width="1.5" stroke-linecap="round"/></svg>'
 
             if gate["threshold"] <= 1.0 and gate["name"] != "Confidence Calibration (ECE)":
                 thresh_str = f"{gate['threshold']:.0%}"
