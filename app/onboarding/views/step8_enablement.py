@@ -44,14 +44,14 @@ def render(current_step: int = 8):
 
         for cat, items in categories.items():
             st.markdown(
-                f'<div style="font-size:0.72rem;font-weight:600;color:#64748b;text-transform:uppercase;'
+                f'<div style="font-size:0.72rem;font-weight:600;color:#666666;text-transform:uppercase;'
                 f'letter-spacing:0.5px;margin:0.75rem 0 0.25rem 0">{cat}</div>',
                 unsafe_allow_html=True,
             )
             for item in items:
                 if item["status"] == "complete":
                     icon = "✅"
-                    color = "#0f172a"
+                    color = "#000000"
                 else:
                     icon = "⏳"
                     color = "#d97706"
@@ -75,7 +75,7 @@ def render(current_step: int = 8):
         ]:
             rows_html += f"""
             <tr>
-                <td style="font-weight:500;color:#64748b;width:200px">{label}</td>
+                <td style="font-weight:500;color:#666666;width:200px">{label}</td>
                 <td style="font-weight:500">{value}</td>
             </tr>"""
 

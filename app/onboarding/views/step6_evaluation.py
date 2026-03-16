@@ -28,7 +28,7 @@ def render(current_step: int = 6):
                     <div class="mode-icon">{mode['icon']}</div>
                     <div class="mode-title">{mode['label']}</div>
                     <div class="mode-desc">{mode['description']}</div>
-                    <div style="margin-top:0.5rem;font-size:0.7rem;color:#64748b">Min accuracy: {mode['min_accuracy']:.0%}</div>
+                    <div style="margin-top:0.5rem;font-size:0.7rem;color:#666666">Min accuracy: {mode['min_accuracy']:.0%}</div>
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -90,21 +90,21 @@ def render(current_step: int = 6):
         trend = EVALUATION_PLAN["accuracy_trend"]
         scaled = [int(v * 100) for v in trend]
         labels = [f"R{i+1}" for i in range(len(trend))]
-        render_trend_chart(scaled, color="#3b82f6", target=88, height=70, labels=labels)
+        render_trend_chart(scaled, color="#E60000", target=88, height=70, labels=labels)
 
         st.markdown("<br>", unsafe_allow_html=True)
 
         render_section_header("Evaluation Segments")
         for seg in EVALUATION_PLAN["segments"]:
             slices_html = "".join(
-                f'<span style="background:#f1f5f9;padding:0.2rem 0.6rem;border-radius:4px;font-size:0.72rem;color:#475569">{s}</span>'
+                f'<span style="background:#f5f5f5;padding:0.2rem 0.6rem;border-radius:4px;font-size:0.72rem;color:#333333">{s}</span>'
                 for s in seg["slices"]
             )
             st.markdown(f"""
-            <div style="margin-bottom:0.75rem;padding:0.85rem;background:white;border:1px solid #e2e8f0;border-radius:8px">
+            <div style="margin-bottom:0.75rem;padding:0.85rem;background:white;border:1px solid #e5e5e5;border-radius:8px">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem">
-                    <span style="font-weight:600;font-size:0.85rem;color:#0f172a">{seg['dimension']}</span>
-                    <span style="font-size:0.75rem;color:#64748b">Coverage: {seg['coverage']}</span>
+                    <span style="font-weight:600;font-size:0.85rem;color:#000000">{seg['dimension']}</span>
+                    <span style="font-size:0.75rem;color:#666666">Coverage: {seg['coverage']}</span>
                 </div>
                 <div style="display:flex;gap:0.4rem;flex-wrap:wrap">{slices_html}</div>
             </div>
@@ -113,7 +113,7 @@ def render(current_step: int = 6):
     with col_side:
         render_readiness_ring(EVALUATION_PLAN["readiness_score"])
         st.markdown(
-            '<p style="text-align:center;font-size:0.8rem;color:#64748b;margin-top:0.5rem">Readiness Score</p>',
+            '<p style="text-align:center;font-size:0.8rem;color:#666666;margin-top:0.5rem">Readiness Score</p>',
             unsafe_allow_html=True,
         )
 

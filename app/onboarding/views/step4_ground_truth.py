@@ -107,8 +107,8 @@ def render(current_step: int = 4):
 
         render_summary_card("Evaluation Mix", [
             ("Automated (labeled)", "20.8%", "#16a34a"),
-            ("Expert review (sampled)", "~15%", "#2563eb"),
-            ("Confidence-only", "~64%", "#94a3b8"),
+            ("Expert review (sampled)", "~15%", "#E60000"),
+            ("Confidence-only", "~64%", "#999999"),
         ])
 
     render_action_bar(current_step)

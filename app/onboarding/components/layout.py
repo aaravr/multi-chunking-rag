@@ -117,7 +117,7 @@ def render_summary_card(title: str, rows: list):
     items = ""
     for row in rows:
         label, value = row[0], row[1]
-        color = row[2] if len(row) > 2 else "#0f172a"
+        color = row[2] if len(row) > 2 else "#000000"
         items += f'''<div class="summary-row">
             <span class="summary-label">{label}</span>
             <span class="summary-value" style="color:{color}">{value}</span>
@@ -170,7 +170,7 @@ def render_nav_buttons(current_step: int, total_steps: int = 8):
     render_action_bar(current_step, total_steps)
 
 
-def render_mini_chart(values: list, color: str = "#93c5fd"):
+def render_mini_chart(values: list, color: str = "#ff9999"):
     """Render a mini inline bar chart from a list of values."""
     if not values:
         return
@@ -198,7 +198,7 @@ def render_stacked_bar_chart(fields: list):
         r_pct = f["error"] / total * 100
         rows += (
             f'<div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.45rem">'
-            f'<span style="font-size:0.75rem;font-weight:500;color:#1e293b;width:110px;text-align:right;flex-shrink:0">{f["name"]}</span>'
+            f'<span style="font-size:0.75rem;font-weight:500;color:#000000;width:110px;text-align:right;flex-shrink:0">{f["name"]}</span>'
             f'<div style="flex:1;display:flex;height:18px;border-radius:3px;overflow:hidden">'
             f'<div style="width:{e_pct}%;background:#16a34a"></div>'
             f'<div style="width:{p_pct}%;background:#eab308"></div>'
@@ -207,7 +207,7 @@ def render_stacked_bar_chart(fields: list):
         )
 
     legend = (
-        '<div style="display:flex;gap:1rem;margin-top:0.5rem;font-size:0.7rem;color:#64748b">'
+        '<div style="display:flex;gap:1rem;margin-top:0.5rem;font-size:0.7rem;color:#666666">'
         '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#16a34a;margin-right:0.3rem;vertical-align:middle"></span>Exact Match</span>'
         '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#eab308;margin-right:0.3rem;vertical-align:middle"></span>Partial</span>'
         '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#ef4444;margin-right:0.3rem;vertical-align:middle"></span>Errors</span>'
@@ -215,7 +215,7 @@ def render_stacked_bar_chart(fields: list):
     )
 
     st.html(
-        f'<div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:1rem 1.25rem">'
+        f'<div style="background:white;border:1px solid #e5e5e5;border-radius:10px;padding:1rem 1.25rem">'
         f'{rows}{legend}</div>'
     )
 
@@ -253,15 +253,15 @@ def render_donut_chart(segments: list, center_value: str, center_label: str, siz
         f'<div style="text-align:center">'
         f'<div style="width:{size}px;height:{size}px;border-radius:50%;background:conic-gradient({gradient});display:flex;align-items:center;justify-content:center;margin:0 auto">'
         f'<div style="width:{inner_size}px;height:{inner_size}px;border-radius:50%;background:white;display:flex;flex-direction:column;align-items:center;justify-content:center">'
-        f'<span style="font-size:1.5rem;font-weight:700;color:#0f172a;line-height:1">{center_value}</span>'
-        f'<span style="font-size:0.62rem;color:#64748b;text-transform:uppercase;letter-spacing:0.5px">{center_label}</span>'
+        f'<span style="font-size:1.5rem;font-weight:700;color:#000000;line-height:1">{center_value}</span>'
+        f'<span style="font-size:0.62rem;color:#666666;text-transform:uppercase;letter-spacing:0.5px">{center_label}</span>'
         f'</div></div>'
-        f'<div style="display:flex;flex-wrap:wrap;gap:0.5rem 1rem;justify-content:center;margin-top:0.6rem;font-size:0.7rem;color:#475569">'
+        f'<div style="display:flex;flex-wrap:wrap;gap:0.5rem 1rem;justify-content:center;margin-top:0.6rem;font-size:0.7rem;color:#333333">'
         f'{legend_items}</div></div>'
     )
 
 
-def render_trend_chart(values: list, color: str = "#3b82f6",
+def render_trend_chart(values: list, color: str = "#E60000",
                        target: float = None, height: int = 60,
                        labels: list = None):
     """Render a bar chart with optional target line and labels.
@@ -286,8 +286,8 @@ def render_trend_chart(values: list, color: str = "#3b82f6",
     if target is not None:
         target_pos = int((target / max_val) * (height - 4))
         target_html = (
-            f'<div style="position:absolute;bottom:{target_pos}px;left:0;right:0;border-top:2px dashed #94a3b8;z-index:1"></div>'
-            f'<div style="position:absolute;bottom:{target_pos + 2}px;right:0;font-size:0.6rem;color:#94a3b8;background:#f8fafc;padding:0 0.3rem">Target: {target}</div>'
+            f'<div style="position:absolute;bottom:{target_pos}px;left:0;right:0;border-top:2px dashed #999999;z-index:1"></div>'
+            f'<div style="position:absolute;bottom:{target_pos + 2}px;right:0;font-size:0.6rem;color:#999999;background:#fafafa;padding:0 0.3rem">Target: {target}</div>'
         )
 
     label_html = ""
@@ -295,10 +295,10 @@ def render_trend_chart(values: list, color: str = "#3b82f6",
         label_items = ""
         for lbl in labels:
             label_items += f'<span style="flex:1;text-align:center;min-width:8px">{lbl}</span>'
-        label_html = f'<div style="display:flex;gap:3px;font-size:0.55rem;color:#94a3b8;margin-top:0.2rem">{label_items}</div>'
+        label_html = f'<div style="display:flex;gap:3px;font-size:0.55rem;color:#999999;margin-top:0.2rem">{label_items}</div>'
 
     st.html(
-        f'<div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:0.85rem 1rem">'
+        f'<div style="background:white;border:1px solid #e5e5e5;border-radius:10px;padding:0.85rem 1rem">'
         f'<div style="position:relative;height:{height}px;display:flex;align-items:flex-end;gap:3px">'
         f'{target_html}{bars}</div>{label_html}</div>'
     )
@@ -320,7 +320,7 @@ def render_kpi_delta(label: str, value: str, delta: str = "",
             delta_color = "#dc2626"
         else:
             arrow = "→"
-            delta_color = "#64748b"
+            delta_color = "#666666"
         delta_html = f'<span style="font-size:0.75rem;font-weight:600;color:{delta_color};margin-left:0.5rem">{arrow} {delta}</span>'
     else:
         delta_html = ""
@@ -343,7 +343,7 @@ def render_sidebar_workspace():
         <div class="sidebar-workspace-label">Workspace</div>
         <div class="sidebar-workspace-name">
             {WORKSPACE['name'].split('—')[0].strip()}
-            <span style="color:#94a3b8;font-size:0.7rem">&#9662;</span>
+            <span style="color:#999999;font-size:0.7rem">&#9662;</span>
         </div>
     </div>
     """, unsafe_allow_html=True)

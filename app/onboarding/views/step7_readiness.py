@@ -82,7 +82,7 @@ def render(current_step: int = 7):
         trend = READINESS["accuracy_trend"]
         scaled = [int(v * 100) for v in trend]
         labels = [f"R{i+1}" for i in range(len(trend))]
-        render_trend_chart(scaled, color="#3b82f6", target=88, height=70, labels=labels)
+        render_trend_chart(scaled, color="#E60000", target=88, height=70, labels=labels)
 
         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -101,14 +101,14 @@ def render(current_step: int = 7):
 
         render_section_header("Risks & Mitigations")
         for risk in READINESS["risks"]:
-            sev_color = "#d97706" if risk["severity"] == "Medium" else "#94a3b8"
-            sev_bg = "#fffbeb" if risk["severity"] == "Medium" else "#f8fafc"
+            sev_color = "#d97706" if risk["severity"] == "Medium" else "#999999"
+            sev_bg = "#fffbeb" if risk["severity"] == "Medium" else "#fafafa"
             st.markdown(f"""
-            <div style="padding:0.85rem;margin-bottom:0.5rem;background:{sev_bg};border:1px solid #e2e8f0;border-left:4px solid {sev_color};border-radius:8px">
+            <div style="padding:0.85rem;margin-bottom:0.5rem;background:{sev_bg};border:1px solid #e5e5e5;border-left:4px solid {sev_color};border-radius:8px">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.3rem">
-                    <span style="font-weight:600;font-size:0.82rem;color:#0f172a">{risk['severity']} Risk</span>
+                    <span style="font-weight:600;font-size:0.82rem;color:#000000">{risk['severity']} Risk</span>
                 </div>
-                <div style="font-size:0.8rem;color:#475569;margin-bottom:0.3rem">{risk['description']}</div>
+                <div style="font-size:0.8rem;color:#333333;margin-bottom:0.3rem">{risk['description']}</div>
                 <div style="font-size:0.78rem;color:#16a34a"><strong>Mitigation:</strong> {risk['mitigation']}</div>
             </div>
             """, unsafe_allow_html=True)
@@ -135,7 +135,7 @@ def render(current_step: int = 7):
     with col_side:
         render_readiness_ring(READINESS["readiness_score"])
         st.markdown(
-            '<p style="text-align:center;font-size:0.8rem;color:#64748b;margin-top:0.5rem">Overall Readiness</p>',
+            '<p style="text-align:center;font-size:0.8rem;color:#666666;margin-top:0.5rem">Overall Readiness</p>',
             unsafe_allow_html=True,
         )
 

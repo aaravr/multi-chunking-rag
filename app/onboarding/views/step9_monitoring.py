@@ -18,15 +18,15 @@ def render():
     # ── Status bar ───────────────────────────────────────────────────
     status_color = "#16a34a" if MONITORING["status"] == "healthy" else "#d97706"
     st.markdown(f"""
-    <div style="display:flex;align-items:center;gap:1.5rem;padding:0.65rem 1.25rem;background:white;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:1rem">
+    <div style="display:flex;align-items:center;gap:1.5rem;padding:0.65rem 1.25rem;background:white;border:1px solid #e5e5e5;border-radius:8px;margin-bottom:1rem">
         <div style="display:flex;align-items:center;gap:0.4rem">
             <div style="width:10px;height:10px;border-radius:50%;background:{status_color}"></div>
             <span style="font-weight:600;font-size:0.82rem;color:{status_color}">{MONITORING['status'].upper()}</span>
         </div>
-        <span style="font-size:0.78rem;color:#64748b">Mode: <strong style="color:#0f172a">{MONITORING['deployment_mode']}</strong></span>
-        <span style="font-size:0.78rem;color:#64748b">Model: <strong style="color:#0f172a">{MONITORING['model_version']}</strong></span>
-        <span style="font-size:0.78rem;color:#64748b">Uptime: <strong style="color:#0f172a">{MONITORING['uptime']}</strong></span>
-        <span style="font-size:0.78rem;color:#94a3b8;margin-left:auto">Last updated: {MONITORING['last_updated']}</span>
+        <span style="font-size:0.78rem;color:#666666">Mode: <strong style="color:#000000">{MONITORING['deployment_mode']}</strong></span>
+        <span style="font-size:0.78rem;color:#666666">Model: <strong style="color:#000000">{MONITORING['model_version']}</strong></span>
+        <span style="font-size:0.78rem;color:#666666">Uptime: <strong style="color:#000000">{MONITORING['uptime']}</strong></span>
+        <span style="font-size:0.78rem;color:#999999;margin-left:auto">Last updated: {MONITORING['last_updated']}</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -52,7 +52,7 @@ def render():
         # ── Volume Trend ─────────────────────────────────────────────
         render_section_header("Document Volume — Last 14 Days")
         vol_labels = [f"D{i+1}" for i in range(len(vol["trend"]))]
-        render_trend_chart(vol["trend"], color="#3b82f6", height=70, labels=vol_labels)
+        render_trend_chart(vol["trend"], color="#E60000", height=70, labels=vol_labels)
 
         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -78,7 +78,7 @@ def render():
             }.get(f["status"], render_badge("Attention", "fail"))
 
             drift_icon = "→" if f["drift"] == "stable" else "↑" if f["drift"] == "improving" else "↓"
-            drift_color = "#64748b" if f["drift"] == "stable" else "#16a34a" if f["drift"] == "improving" else "#dc2626"
+            drift_color = "#666666" if f["drift"] == "stable" else "#16a34a" if f["drift"] == "improving" else "#dc2626"
 
             rows_html += f"""
             <tr>
@@ -143,7 +143,7 @@ def render():
             <tr>
                 <td style="font-family:monospace;font-size:0.76rem">{item['doc_id']}</td>
                 <td style="font-size:0.8rem">{item['error']}</td>
-                <td style="font-size:0.72rem;color:#94a3b8;white-space:nowrap">{item['timestamp']}</td>
+                <td style="font-size:0.72rem;color:#999999;white-space:nowrap">{item['timestamp']}</td>
                 <td>{badge}</td>
             </tr>"""
 
@@ -161,7 +161,7 @@ def render():
         total_reviews = rev["auto_accepted"] + rev["manual_reviews"] + rev["escalations"]
         review_segments = [
             (rev["auto_accepted"] / total_reviews * 100, "#16a34a", f"Auto ({rev['auto_accepted']})"),
-            (rev["manual_reviews"] / total_reviews * 100, "#3b82f6", f"Manual ({rev['manual_reviews']})"),
+            (rev["manual_reviews"] / total_reviews * 100, "#333333", f"Manual ({rev['manual_reviews']})"),
             (rev["escalations"] / total_reviews * 100, "#ef4444", f"Escalated ({rev['escalations']})"),
         ]
         render_donut_chart(
@@ -175,18 +175,18 @@ def render():
         st.markdown('<div class="metric-card"><div class="metric-label">Maintenance Actions</div>', unsafe_allow_html=True)
         for ma in MONITORING["maintenance_actions"]:
             if ma["status"] == "recommended":
-                btn_style = "background:#1e40af;color:white"
+                btn_style = "background:#E60000;color:white"
                 label = "Recommended"
             else:
-                btn_style = "background:#f1f5f9;color:#475569"
+                btn_style = "background:#f5f5f5;color:#333333"
                 label = "Available"
             st.markdown(f"""
-            <div style="padding:0.5rem 0;border-bottom:1px solid #f1f5f9">
+            <div style="padding:0.5rem 0;border-bottom:1px solid #f5f5f5">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.2rem">
-                    <span style="font-size:0.8rem;font-weight:600;color:#0f172a">{ma['action']}</span>
+                    <span style="font-size:0.8rem;font-weight:600;color:#000000">{ma['action']}</span>
                     <span style="font-size:0.65rem;padding:0.15rem 0.5rem;border-radius:4px;{btn_style};font-weight:600">{label}</span>
                 </div>
-                <div style="font-size:0.72rem;color:#64748b">{ma['description']}</div>
+                <div style="font-size:0.72rem;color:#666666">{ma['description']}</div>
             </div>
             """, unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)

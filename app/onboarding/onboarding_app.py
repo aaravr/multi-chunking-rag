@@ -109,11 +109,11 @@ else:
         # Progress indicator
         st.markdown(f"""
         <div style="margin-top:1.5rem;padding:0 0.25rem">
-            <div style="font-size:0.68rem;color:#94a3b8;margin-bottom:0.3rem">PROGRESS</div>
+            <div style="font-size:0.68rem;color:#999999;margin-bottom:0.3rem">PROGRESS</div>
             <div class="progress-bar-track" style="height:6px">
-                <div class="progress-bar-fill" style="width:{int((current/8)*100)}%;background:#3b82f6"></div>
+                <div class="progress-bar-fill" style="width:{int((current/8)*100)}%;background:#E60000"></div>
             </div>
-            <div style="font-size:0.68rem;color:#94a3b8;margin-top:0.2rem">{current} of 8 steps</div>
+            <div style="font-size:0.68rem;color:#999999;margin-top:0.2rem">{current} of 8 steps</div>
         </div>
         """, unsafe_allow_html=True)
 

@@ -181,8 +181,8 @@ EVALUATION_PLAN = {
     "accuracy_trend": [0.82, 0.84, 0.86, 0.87, 0.88, 0.89, 0.90, 0.91, 0.91, 0.912],
     # Processing breakdown for donut
     "processing_breakdown": [
-        (72, "#16a34a", "Processed"),
-        (15, "#3b82f6", "In Review"),
+        (72, "#008a00", "Processed"),
+        (15, "#E60000", "In Review"),
         (8, "#eab308", "Low Confidence"),
         (5, "#ef4444", "Failed"),
     ],
@@ -248,10 +248,10 @@ READINESS = {
     "accuracy_trend": [0.83, 0.85, 0.87, 0.88, 0.89, 0.90, 0.91, 0.912],
     # Readiness breakdown for donut chart
     "readiness_breakdown": [
-        (82, "#1e40af", "Classification 94%"),
-        (91, "#3b82f6", "Extraction 91%"),
-        (88, "#60a5fa", "Critical Fields 88%"),
-        (96, "#16a34a", "Evidence Match 96%"),
+        (82, "#E60000", "Classification 94%"),
+        (91, "#cc0000", "Extraction 91%"),
+        (88, "#990000", "Critical Fields 88%"),
+        (96, "#008a00", "Evidence Match 96%"),
     ],
 }
 

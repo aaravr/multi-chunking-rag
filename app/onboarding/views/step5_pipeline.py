@@ -52,7 +52,7 @@ def render(current_step: int = 5):
         for label, value in rows:
             rows_html += f"""
             <tr>
-                <td style="font-weight:500;color:#64748b;width:220px">{label}</td>
+                <td style="font-weight:500;color:#666666;width:220px">{label}</td>
                 <td style="font-weight:500">{value}</td>
             </tr>"""
 

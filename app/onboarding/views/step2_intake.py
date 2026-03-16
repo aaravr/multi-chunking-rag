@@ -34,7 +34,7 @@ def render(current_step: int = 2):
             <tr>
                 <td style="font-weight:500">{src['name']}</td>
                 <td>{src['type'].title()}</td>
-                <td><code style="font-size:0.75rem;background:#f1f5f9;padding:2px 6px;border-radius:3px">{src['path'] or '—'}</code></td>
+                <td><code style="font-size:0.75rem;background:#f5f5f5;padding:2px 6px;border-radius:3px">{src['path'] or '—'}</code></td>
                 <td style="text-align:right;font-weight:600">{src['count']:,}</td>
                 <td>{status_badge}</td>
             </tr>"""
@@ -69,11 +69,11 @@ def render(current_step: int = 2):
                 pct = count / INTAKE_SUMMARY["total_documents"] * 100
                 st.markdown(f"""
                 <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.35rem">
-                    <span style="font-size:0.8rem;width:50px;font-weight:500;color:#1e293b">{ft}</span>
+                    <span style="font-size:0.8rem;width:50px;font-weight:500;color:#000000">{ft}</span>
                     <div style="flex:1;height:10px;border-radius:5px;overflow:hidden" class="progress-bar-track">
-                        <div class="progress-bar-fill" style="width:{pct}%;background:#3b82f6"></div>
+                        <div class="progress-bar-fill" style="width:{pct}%;background:#E60000"></div>
                     </div>
-                    <span style="font-size:0.75rem;color:#64748b;width:70px;text-align:right">{count:,} ({pct:.0f}%)</span>
+                    <span style="font-size:0.75rem;color:#666666;width:70px;text-align:right">{count:,} ({pct:.0f}%)</span>
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -83,11 +83,11 @@ def render(current_step: int = 2):
                 pct = count / INTAKE_SUMMARY["total_documents"] * 100
                 st.markdown(f"""
                 <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.35rem">
-                    <span style="font-size:0.8rem;width:60px;font-weight:500;color:#1e293b">{lang}</span>
+                    <span style="font-size:0.8rem;width:60px;font-weight:500;color:#000000">{lang}</span>
                     <div style="flex:1;height:10px;border-radius:5px;overflow:hidden" class="progress-bar-track">
                         <div class="progress-bar-fill" style="width:{pct}%;background:#16a34a"></div>
                     </div>
-                    <span style="font-size:0.75rem;color:#64748b;width:70px;text-align:right">{count:,} ({pct:.0f}%)</span>
+                    <span style="font-size:0.75rem;color:#666666;width:70px;text-align:right">{count:,} ({pct:.0f}%)</span>
                 </div>
                 """, unsafe_allow_html=True)
 

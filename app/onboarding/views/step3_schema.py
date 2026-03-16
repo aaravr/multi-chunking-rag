@@ -38,7 +38,7 @@ def render(current_step: int = 3):
 
         render_section_header("Extraction Schema")
         st.markdown(
-            '<p style="color:#64748b;font-size:0.8rem">12 fields defined &nbsp;&bull;&nbsp; '
+            '<p style="color:#666666;font-size:0.8rem">12 fields defined &nbsp;&bull;&nbsp; '
             '5 critical &nbsp;&bull;&nbsp; 3 with reference resolution</p>',
             unsafe_allow_html=True,
         )
@@ -50,16 +50,16 @@ def render(current_step: int = 3):
             }.get(f["criticality"], "pending")
             crit_badge = render_badge(f["criticality"], crit_variant)
             req = "✓" if f["required"] else "—"
-            ref = '<span style="color:#3b82f6">🔗</span>' if f["reference_resolver"] else ""
+            ref = '<span style="color:#E60000">🔗</span>' if f["reference_resolver"] else ""
             rows_html += f"""
             <tr>
                 <td style="font-weight:500;font-family:monospace;font-size:0.78rem">{f['name']}</td>
                 <td>{f['type']}</td>
                 <td style="text-align:center">{req}</td>
                 <td>{crit_badge}</td>
-                <td style="font-size:0.75rem;color:#64748b">{f['validation']}</td>
+                <td style="font-size:0.75rem;color:#666666">{f['validation']}</td>
                 <td style="text-align:center">{ref}</td>
-                <td style="font-size:0.75rem;color:#64748b;max-width:180px">{f['description']}</td>
+                <td style="font-size:0.75rem;color:#666666;max-width:180px">{f['description']}</td>
             </tr>"""
 
         st.markdown(f"""
