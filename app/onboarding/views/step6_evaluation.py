@@ -5,6 +5,7 @@ from app.onboarding.mock_data import EVALUATION_PLAN
 from app.onboarding.components.layout import (
     render_page_title, render_section_header, render_recommendation,
     render_badge, render_readiness_ring, render_action_bar,
+    render_stacked_bar_chart, render_donut_chart, render_trend_chart,
 )
 
 
@@ -78,6 +79,21 @@ def render(current_step: int = 6):
 
         st.markdown("<br>", unsafe_allow_html=True)
 
+        # ── Performance by Field (stacked bars) ──────────────────────
+        render_section_header("Performance by Field")
+        render_stacked_bar_chart(EVALUATION_PLAN["field_performance"])
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── Accuracy Trend ───────────────────────────────────────────
+        render_section_header("Accuracy Trend — Evaluation Runs")
+        trend = EVALUATION_PLAN["accuracy_trend"]
+        scaled = [int(v * 100) for v in trend]
+        labels = [f"R{i+1}" for i in range(len(trend))]
+        render_trend_chart(scaled, color="#3b82f6", target=88, height=70, labels=labels)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
         render_section_header("Evaluation Segments")
         for seg in EVALUATION_PLAN["segments"]:
             slices_html = "".join(
@@ -100,6 +116,18 @@ def render(current_step: int = 6):
             '<p style="text-align:center;font-size:0.8rem;color:#64748b;margin-top:0.5rem">Readiness Score</p>',
             unsafe_allow_html=True,
         )
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── Processing Breakdown Donut ───────────────────────────────
+        render_donut_chart(
+            EVALUATION_PLAN["processing_breakdown"],
+            center_value="72%",
+            center_label="Processed",
+            size=130,
+        )
+
+        st.markdown("<br>", unsafe_allow_html=True)
 
         render_recommendation(
             "Target: Shadow Deployment",

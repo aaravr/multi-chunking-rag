@@ -28,6 +28,7 @@ def main():
     parser.add_argument("--height", type=int, default=1080, help="Viewport height")
     parser.add_argument("--wait", type=float, default=3.0, help="Seconds to wait for page render")
     parser.add_argument("--chrome-path", default=None, help="Path to Chrome/Chromium executable")
+    parser.add_argument("--dpi", type=float, default=2.0, help="Device scale factor (2.0 for retina)")
     args = parser.parse_args()
 
     try:
@@ -57,7 +58,10 @@ def main():
         if args.chrome_path:
             launch_kwargs["executable_path"] = args.chrome_path
         browser = p.chromium.launch(**launch_kwargs)
-        page = browser.new_page(viewport={"width": args.width, "height": args.height})
+        page = browser.new_page(
+            viewport={"width": args.width, "height": args.height},
+            device_scale_factor=args.dpi,
+        )
 
         for step_num, name in screens:
             url = f"{args.url}/?step={step_num}"

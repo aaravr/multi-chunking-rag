@@ -168,6 +168,24 @@ EVALUATION_PLAN = {
         {"dimension": "Risk Rating", "slices": ["1–3 (Pass)", "4–5 (Watch)", "6–8 (Substandard)", "9–10 (Doubtful/Loss)"], "coverage": "94%"},
     ],
     "readiness_score": 87,
+    # Field-level performance breakdown (exact match, partial, error counts)
+    "field_performance": [
+        {"name": "Invoice #", "exact": 89, "partial": 8, "error": 3},
+        {"name": "Date", "exact": 85, "partial": 10, "error": 5},
+        {"name": "Borrower", "exact": 82, "partial": 12, "error": 6},
+        {"name": "Amount", "exact": 91, "partial": 5, "error": 4},
+        {"name": "Risk Rating", "exact": 87, "partial": 9, "error": 4},
+        {"name": "Collateral", "exact": 78, "partial": 14, "error": 8},
+    ],
+    # Accuracy trend by evaluation run
+    "accuracy_trend": [0.82, 0.84, 0.86, 0.87, 0.88, 0.89, 0.90, 0.91, 0.91, 0.912],
+    # Processing breakdown for donut
+    "processing_breakdown": [
+        (72, "#16a34a", "Processed"),
+        (15, "#3b82f6", "In Review"),
+        (8, "#eab308", "Low Confidence"),
+        (5, "#ef4444", "Failed"),
+    ],
 }
 
 
@@ -209,6 +227,32 @@ READINESS = {
         "compliance": {"name": "Maria Santos", "status": "pending", "date": None},
         "technology": {"name": "David Park", "status": "pending", "date": None},
     },
+    # Business impact KPIs
+    "business_impact": {
+        "auto_processed_pct": 0.76,
+        "avg_handling_time_min": 2.4,
+        "handling_time_delta": "+62%",
+        "exceptions": 54,
+        "exceptions_delta": "+12%",
+    },
+    # Stacked bar performance data
+    "field_performance": [
+        {"name": "borrower_name", "exact": 91, "partial": 6, "error": 3},
+        {"name": "facility_amount", "exact": 94, "partial": 4, "error": 2},
+        {"name": "maturity_date", "exact": 88, "partial": 8, "error": 4},
+        {"name": "risk_rating", "exact": 90, "partial": 7, "error": 3},
+        {"name": "collateral_type", "exact": 85, "partial": 10, "error": 5},
+        {"name": "analyst_name", "exact": 72, "partial": 16, "error": 12},
+    ],
+    # Accuracy trend across evaluation runs
+    "accuracy_trend": [0.83, 0.85, 0.87, 0.88, 0.89, 0.90, 0.91, 0.912],
+    # Readiness breakdown for donut chart
+    "readiness_breakdown": [
+        (82, "#1e40af", "Classification 94%"),
+        (91, "#3b82f6", "Extraction 91%"),
+        (88, "#60a5fa", "Critical Fields 88%"),
+        (96, "#16a34a", "Evidence Match 96%"),
+    ],
 }
 
 

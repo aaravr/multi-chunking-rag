@@ -4,8 +4,8 @@ import streamlit as st
 from app.onboarding.mock_data import MONITORING
 from app.onboarding.components.layout import (
     render_page_title, render_section_header, render_metric_card,
-    render_recommendation, render_badge, render_mini_chart,
-    render_summary_card,
+    render_recommendation, render_badge, render_trend_chart,
+    render_summary_card, render_donut_chart,
 )
 
 
@@ -51,19 +51,17 @@ def render():
     with col_main:
         # ── Volume Trend ─────────────────────────────────────────────
         render_section_header("Document Volume — Last 14 Days")
-        render_mini_chart(vol["trend"], color="#3b82f6")
+        vol_labels = [f"D{i+1}" for i in range(len(vol["trend"]))]
+        render_trend_chart(vol["trend"], color="#3b82f6", height=70, labels=vol_labels)
 
         st.markdown("<br>", unsafe_allow_html=True)
 
         # ── Accuracy Trend ───────────────────────────────────────────
         render_section_header("Accuracy Trend — Last 14 Days")
         acc_scaled = [int(v * 100) for v in acc["trend"]]
-        render_mini_chart(acc_scaled, color="#16a34a")
         target_pct = int(acc["target"] * 100)
-        st.markdown(
-            f'<div style="font-size:0.72rem;color:#64748b;margin-top:0.25rem">Target line: {target_pct}%</div>',
-            unsafe_allow_html=True,
-        )
+        acc_labels = [f"D{i+1}" for i in range(len(acc["trend"]))]
+        render_trend_chart(acc_scaled, color="#16a34a", target=target_pct, height=70, labels=acc_labels)
 
         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -159,20 +157,19 @@ def render():
         """, unsafe_allow_html=True)
 
     with col_side:
-        # ── Review Burden ────────────────────────────────────────────
-        st.markdown(f"""
-        <div class="metric-card" style="text-align:center">
-            <div class="metric-label">Review Burden</div>
-            <div class="metric-value">{rev['auto_accept_rate']:.0%}</div>
-            <div class="metric-sub">Auto-Accept Rate</div>
-            <div class="progress-bar-track" style="margin-top:0.5rem">
-                <div class="progress-bar-fill" style="width:{int(rev['auto_accept_rate'] * 100)}%;background:#16a34a"></div>
-            </div>
-            <div style="font-size:0.75rem;color:#64748b;margin-top:0.5rem">
-                {rev['auto_accepted']} auto / {rev['manual_reviews']} manual / {rev['escalations']} escalated
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        # ── Review Burden Donut ───────────────────────────────────────
+        total_reviews = rev["auto_accepted"] + rev["manual_reviews"] + rev["escalations"]
+        review_segments = [
+            (rev["auto_accepted"] / total_reviews * 100, "#16a34a", f"Auto ({rev['auto_accepted']})"),
+            (rev["manual_reviews"] / total_reviews * 100, "#3b82f6", f"Manual ({rev['manual_reviews']})"),
+            (rev["escalations"] / total_reviews * 100, "#ef4444", f"Escalated ({rev['escalations']})"),
+        ]
+        render_donut_chart(
+            review_segments,
+            center_value=f"{rev['auto_accept_rate']:.0%}",
+            center_label="Auto-Accept",
+            size=130,
+        )
 
         # ── Maintenance Actions ──────────────────────────────────────
         st.markdown('<div class="metric-card"><div class="metric-label">Maintenance Actions</div>', unsafe_allow_html=True)

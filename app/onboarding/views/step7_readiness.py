@@ -6,6 +6,8 @@ from app.onboarding.components.layout import (
     render_page_title, render_section_header, render_metric_card,
     render_recommendation, render_badge, render_readiness_ring,
     render_summary_card, render_action_bar,
+    render_stacked_bar_chart, render_donut_chart, render_trend_chart,
+    render_kpi_delta,
 )
 
 
@@ -69,6 +71,34 @@ def render(current_step: int = 7):
 
         st.markdown("<br>", unsafe_allow_html=True)
 
+        # ── Performance by Field (stacked bars) ──────────────────────
+        render_section_header("Performance by Field")
+        render_stacked_bar_chart(READINESS["field_performance"])
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── Accuracy Trend ───────────────────────────────────────────
+        render_section_header("Accuracy Trend — Evaluation Runs")
+        trend = READINESS["accuracy_trend"]
+        scaled = [int(v * 100) for v in trend]
+        labels = [f"R{i+1}" for i in range(len(trend))]
+        render_trend_chart(scaled, color="#3b82f6", target=88, height=70, labels=labels)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── Business Impact KPIs ─────────────────────────────────────
+        render_section_header("Business Impact")
+        bi = READINESS["business_impact"]
+        k1, k2, k3 = st.columns(3)
+        with k1:
+            render_kpi_delta("Auto-Processed", f"{bi['auto_processed_pct']:.0%}", bi["handling_time_delta"], "up")
+        with k2:
+            render_kpi_delta("Avg Handling Time", f"{bi['avg_handling_time_min']} min", bi["handling_time_delta"], "up")
+        with k3:
+            render_kpi_delta("Exceptions", str(bi["exceptions"]), bi["exceptions_delta"], "down")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
         render_section_header("Risks & Mitigations")
         for risk in READINESS["risks"]:
             sev_color = "#d97706" if risk["severity"] == "Medium" else "#94a3b8"
@@ -108,6 +138,21 @@ def render(current_step: int = 7):
             '<p style="text-align:center;font-size:0.8rem;color:#64748b;margin-top:0.5rem">Overall Readiness</p>',
             unsafe_allow_html=True,
         )
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── Readiness Breakdown Donut ─────────────────────────────────
+        breakdown = READINESS["readiness_breakdown"]
+        total = sum(v for v, _, _ in breakdown)
+        donut_segments = [(v / total * 100, c, l) for v, c, l in breakdown]
+        render_donut_chart(
+            donut_segments,
+            center_value=f"{READINESS['readiness_score']}",
+            center_label="Score",
+            size=130,
+        )
+
+        st.markdown("<br>", unsafe_allow_html=True)
 
         render_recommendation(
             "Readiness Assessment",
