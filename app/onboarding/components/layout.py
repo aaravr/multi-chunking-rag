@@ -7,6 +7,39 @@ from app.onboarding.mock_data import WIZARD_STEPS, WORKSPACE
 # ── Navigation items for the top bar ──────────────────────────────────
 NAV_ITEMS = ["Workspaces", "Documents", "Schemas", "Evaluation", "Review", "Production"]
 
+# UBS three-keys logo as inline SVG
+UBS_LOGO_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 28" height="24">'
+    # Three keys icon (simplified)
+    '<g transform="translate(0,2)">'
+    # Key 1 (leftmost)
+    '<g fill="#000000">'
+    '<circle cx="6" cy="6" r="5" fill="none" stroke="#000" stroke-width="1.8"/>'
+    '<rect x="5" y="10" width="2" height="12" rx="0.5"/>'
+    '<rect x="7" y="16" width="4" height="1.8" rx="0.5"/>'
+    '<rect x="7" y="19.5" width="3" height="1.8" rx="0.5"/>'
+    '</g>'
+    # Key 2 (middle, offset)
+    '<g fill="#000000" transform="translate(7,0)">'
+    '<circle cx="6" cy="6" r="5" fill="none" stroke="#000" stroke-width="1.8"/>'
+    '<rect x="5" y="10" width="2" height="12" rx="0.5"/>'
+    '<rect x="7" y="16" width="4" height="1.8" rx="0.5"/>'
+    '<rect x="7" y="19.5" width="3" height="1.8" rx="0.5"/>'
+    '</g>'
+    # Key 3 (rightmost, offset)
+    '<g fill="#000000" transform="translate(14,0)">'
+    '<circle cx="6" cy="6" r="5" fill="none" stroke="#000" stroke-width="1.8"/>'
+    '<rect x="5" y="10" width="2" height="12" rx="0.5"/>'
+    '<rect x="7" y="16" width="4" height="1.8" rx="0.5"/>'
+    '<rect x="7" y="19.5" width="3" height="1.8" rx="0.5"/>'
+    '</g>'
+    '</g>'
+    # "UBS" text in red serif
+    '<text x="40" y="20" font-family="Georgia,\'Times New Roman\',serif" '
+    'font-size="18" font-weight="700" fill="#E60000" letter-spacing="1">UBS</text>'
+    '</svg>'
+)
+
 
 def render_top_nav(active_section: str = "Workspaces"):
     """Render the enterprise top navigation bar."""
@@ -18,6 +51,8 @@ def render_top_nav(active_section: str = "Workspaces"):
     st.markdown(f"""
     <div class="top-nav">
         <div class="nav-brand">
+            {UBS_LOGO_SVG}
+            <span style="color:#e5e5e5;font-size:1.2rem;font-weight:200;margin:0 0.6rem">|</span>
             <span class="nav-brand-name">Enterprise IDP Onboarding Studio</span>
             <span class="nav-brand-chevron">&#9662;</span>
         </div>
