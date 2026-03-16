@@ -3,7 +3,14 @@ from typing import Iterable, List, Optional
 from psycopg2.extras import Json, execute_values
 from pgvector.psycopg2 import register_vector
 
+from core.config import settings
 from core.contracts import ChunkRecord, DocumentFact, DocumentRecord, PageRecord, TriageMetrics
+
+
+def _batched(items: list, batch_size: int):
+    """Yield successive batches from a list."""
+    for i in range(0, len(items), batch_size):
+        yield items[i:i + batch_size]
 
 # Lazy import to avoid circular dependency — agents.contracts imports are deferred.
 # See insert_audit_entry / insert_audit_entries below.
@@ -175,35 +182,20 @@ def insert_chunks(conn, chunks: Iterable[ChunkRecord]) -> None:
     ]
     if not rows:
         return
-    with conn.cursor() as cursor:
-        execute_values(
-            cursor,
-            """
-            INSERT INTO chunks (
-                chunk_id,
-                doc_id,
-                page_numbers,
-                macro_id,
-                child_id,
-                chunk_type,
-                text_content,
-                char_start,
-                char_end,
-                polygons,
-                heading_path,
-                section_id,
-                source_type,
-                embedding,
-                embedding_model,
-                embedding_dim,
-                document_type,
-                classification_label
-            )
-            VALUES %s
-            ON CONFLICT (doc_id, macro_id, child_id) DO NOTHING
-            """,
-            rows,
+    sql = """
+        INSERT INTO chunks (
+            chunk_id, doc_id, page_numbers, macro_id, child_id,
+            chunk_type, text_content, char_start, char_end, polygons,
+            heading_path, section_id, source_type, embedding,
+            embedding_model, embedding_dim, document_type, classification_label
         )
+        VALUES %s
+        ON CONFLICT (doc_id, macro_id, child_id) DO NOTHING
+    """
+    batch_size = settings.bulk_insert_batch_size
+    with conn.cursor() as cursor:
+        for batch in _batched(rows, batch_size):
+            execute_values(cursor, sql, batch)
 
 
 def upsert_document_facts(conn, facts: Iterable[DocumentFact]) -> None:
@@ -450,7 +442,7 @@ def insert_audit_entry(conn, entry) -> None:
 
 
 def insert_audit_entries(conn, entries: list) -> int:
-    """Persist multiple AuditLogEntry objects in a single batch.
+    """Persist multiple AuditLogEntry objects in batches.
 
     Returns the number of entries written.
     """
@@ -465,10 +457,9 @@ def insert_audit_entries(conn, entries: list) -> int:
         )
         for e in entries
     ]
+    sql = f"INSERT INTO audit_log ({_AUDIT_INSERT_COLS}) VALUES %s"
+    batch_size = settings.bulk_insert_batch_size
     with conn.cursor() as cursor:
-        execute_values(
-            cursor,
-            f"INSERT INTO audit_log ({_AUDIT_INSERT_COLS}) VALUES %s",
-            rows,
-        )
+        for batch in _batched(rows, batch_size):
+            execute_values(cursor, sql, batch)
     return len(rows)

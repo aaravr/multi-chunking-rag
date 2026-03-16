@@ -119,8 +119,12 @@ class ModelGateway:
     def __init__(
         self,
         llm_caller: Optional[Callable[..., Dict[str, Any]]] = None,
+        circuit_window_s: Optional[float] = None,
+        circuit_threshold: Optional[int] = None,
     ) -> None:
         self._registry: Dict[str, RegisteredModel] = dict(_MODEL_REGISTRY)
+        self._circuit_window_s = circuit_window_s
+        self._circuit_threshold = circuit_threshold
         self._circuits: Dict[str, CircuitState] = {}
         self._audit_entries: List[AuditLogEntry] = []
         self._total_tokens: int = 0
@@ -173,8 +177,15 @@ class ModelGateway:
                 "All models must be approved before use."
             )
 
-        # Circuit breaker check
-        circuit = self._circuits.setdefault(model_id, CircuitState())
+        # Circuit breaker check — uses configurable window/threshold for high-concurrency scaling
+        cb_kwargs = {}
+        if self._circuit_window_s is not None:
+            cb_kwargs["window_seconds"] = self._circuit_window_s
+        if self._circuit_threshold is not None:
+            cb_kwargs["threshold"] = self._circuit_threshold
+        if model_id not in self._circuits:
+            self._circuits[model_id] = CircuitState(**cb_kwargs)
+        circuit = self._circuits[model_id]
         if circuit.is_open():
             fallback = reg.fallback_model_id
             if fallback and fallback in self._registry:

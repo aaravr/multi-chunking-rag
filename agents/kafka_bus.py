@@ -416,8 +416,9 @@ class KafkaBus:
         from concurrent.futures import ThreadPoolExecutor
 
         if not hasattr(self, "_executor"):
+            from core.config import settings as _cfg
             self._executor = ThreadPoolExecutor(
-                max_workers=8, thread_name_prefix="kafka-fanout"
+                max_workers=_cfg.kafka_fanout_workers, thread_name_prefix="kafka-fanout"
             )
 
         return self._executor.submit(self.send, message)

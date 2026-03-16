@@ -70,8 +70,11 @@ class Settings(BaseSettings):
 
     database_url: str = Field(default="", alias="DATABASE_URL")
     db_pool_size: int = Field(default=5, alias="DB_POOL_SIZE")
+    db_pool_min: int = Field(default=1, alias="DB_POOL_MIN")
+    db_pool_overflow: int = Field(default=10, alias="DB_POOL_OVERFLOW")
     embedding_model: str = "nomic-ai/modernbert-embed-base"
     embedding_dim: int = 768
+    embedding_batch_size: int = Field(default=8, alias="EMBEDDING_BATCH_SIZE")
     data_dir: str = Field(default="data", alias="IDP_DATA_DIR")
     disable_di: bool = Field(default=False, alias="DISABLE_DI")
     enable_hybrid_retrieval: bool = Field(default=False, alias="ENABLE_HYBRID_RETRIEVAL")
@@ -88,6 +91,12 @@ class Settings(BaseSettings):
     enable_redis_working_memory: bool = Field(default=True, alias="ENABLE_REDIS_WORKING_MEMORY")
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
     redis_working_memory_ttl: int = Field(default=900, alias="REDIS_WORKING_MEMORY_TTL")
+    # ── Scaling & Concurrency ───────────────────────────────────────────
+    bulk_insert_batch_size: int = Field(default=500, alias="BULK_INSERT_BATCH_SIZE")
+    circuit_breaker_window_s: float = Field(default=60.0, alias="CIRCUIT_BREAKER_WINDOW_S")
+    circuit_breaker_threshold: int = Field(default=5, alias="CIRCUIT_BREAKER_THRESHOLD")
+    ingestion_worker_threads: int = Field(default=2, alias="INGESTION_WORKER_THREADS")
+    kafka_fanout_workers: int = Field(default=16, alias="KAFKA_FANOUT_WORKERS")
     # ── Sub-configs ──────────────────────────────────────────────────────
     kafka: KafkaSettings = Field(default_factory=KafkaSettings)
     otel: OtelSettings = Field(default_factory=OtelSettings)
