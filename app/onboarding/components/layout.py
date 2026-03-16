@@ -7,36 +7,53 @@ from app.onboarding.mock_data import WIZARD_STEPS, WORKSPACE
 # ── Navigation items for the top bar ──────────────────────────────────
 NAV_ITEMS = ["Workspaces", "Documents", "Schemas", "Evaluation", "Review", "Production"]
 
-# UBS three-keys logo as inline SVG
+# UBS three-keys logo as inline SVG — three ornate crossed keys fanned from center
 UBS_LOGO_SVG = (
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 28" height="24">'
-    # Three keys icon (simplified)
-    '<g transform="translate(0,2)">'
-    # Key 1 (leftmost)
-    '<g fill="#000000">'
-    '<circle cx="6" cy="6" r="5" fill="none" stroke="#000" stroke-width="1.8"/>'
-    '<rect x="5" y="10" width="2" height="12" rx="0.5"/>'
-    '<rect x="7" y="16" width="4" height="1.8" rx="0.5"/>'
-    '<rect x="7" y="19.5" width="3" height="1.8" rx="0.5"/>'
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 32" height="28">'
+    '<g transform="translate(16,16)">'
+    # Key template: oval bow handle at top, shaft going down, two ward teeth
+    # Key 1 — center vertical
+    '<g transform="rotate(0)" fill="#000000" stroke="#000000" stroke-width="0.3">'
+    '<ellipse cx="0" cy="-9" rx="3.8" ry="4.8" fill="none" stroke="#000" stroke-width="1.6"/>'
+    '<line x1="0" y1="-4" x2="0" y2="13" stroke="#000" stroke-width="1.6"/>'
+    '<line x1="0" y1="9" x2="2.5" y2="9" stroke="#000" stroke-width="1.5"/>'
+    '<line x1="0" y1="11.5" x2="2" y2="11.5" stroke="#000" stroke-width="1.5"/>'
+    # Small cross at top of bow
+    '<line x1="-1.5" y1="-12.5" x2="1.5" y2="-12.5" stroke="#000" stroke-width="1"/>'
+    '<line x1="0" y1="-14" x2="0" y2="-11" stroke="#000" stroke-width="1"/>'
+    # Decorative circles in bow
+    '<circle cx="-1.5" cy="-8" r="0.7"/>'
+    '<circle cx="1.5" cy="-8" r="0.7"/>'
+    '<circle cx="0" cy="-6.5" r="0.7"/>'
     '</g>'
-    # Key 2 (middle, offset)
-    '<g fill="#000000" transform="translate(7,0)">'
-    '<circle cx="6" cy="6" r="5" fill="none" stroke="#000" stroke-width="1.8"/>'
-    '<rect x="5" y="10" width="2" height="12" rx="0.5"/>'
-    '<rect x="7" y="16" width="4" height="1.8" rx="0.5"/>'
-    '<rect x="7" y="19.5" width="3" height="1.8" rx="0.5"/>'
+    # Key 2 — rotated -45 degrees (upper-left to lower-right)
+    '<g transform="rotate(-45)" fill="#000000" stroke="#000000" stroke-width="0.3">'
+    '<ellipse cx="0" cy="-9" rx="3.8" ry="4.8" fill="none" stroke="#000" stroke-width="1.6"/>'
+    '<line x1="0" y1="-4" x2="0" y2="13" stroke="#000" stroke-width="1.6"/>'
+    '<line x1="0" y1="9" x2="2.5" y2="9" stroke="#000" stroke-width="1.5"/>'
+    '<line x1="0" y1="11.5" x2="2" y2="11.5" stroke="#000" stroke-width="1.5"/>'
+    '<line x1="-1.5" y1="-12.5" x2="1.5" y2="-12.5" stroke="#000" stroke-width="1"/>'
+    '<line x1="0" y1="-14" x2="0" y2="-11" stroke="#000" stroke-width="1"/>'
+    '<circle cx="-1.5" cy="-8" r="0.7"/>'
+    '<circle cx="1.5" cy="-8" r="0.7"/>'
+    '<circle cx="0" cy="-6.5" r="0.7"/>'
     '</g>'
-    # Key 3 (rightmost, offset)
-    '<g fill="#000000" transform="translate(14,0)">'
-    '<circle cx="6" cy="6" r="5" fill="none" stroke="#000" stroke-width="1.8"/>'
-    '<rect x="5" y="10" width="2" height="12" rx="0.5"/>'
-    '<rect x="7" y="16" width="4" height="1.8" rx="0.5"/>'
-    '<rect x="7" y="19.5" width="3" height="1.8" rx="0.5"/>'
+    # Key 3 — rotated +45 degrees (upper-right to lower-left)
+    '<g transform="rotate(45)" fill="#000000" stroke="#000000" stroke-width="0.3">'
+    '<ellipse cx="0" cy="-9" rx="3.8" ry="4.8" fill="none" stroke="#000" stroke-width="1.6"/>'
+    '<line x1="0" y1="-4" x2="0" y2="13" stroke="#000" stroke-width="1.6"/>'
+    '<line x1="0" y1="9" x2="2.5" y2="9" stroke="#000" stroke-width="1.5"/>'
+    '<line x1="0" y1="11.5" x2="2" y2="11.5" stroke="#000" stroke-width="1.5"/>'
+    '<line x1="-1.5" y1="-12.5" x2="1.5" y2="-12.5" stroke="#000" stroke-width="1"/>'
+    '<line x1="0" y1="-14" x2="0" y2="-11" stroke="#000" stroke-width="1"/>'
+    '<circle cx="-1.5" cy="-8" r="0.7"/>'
+    '<circle cx="1.5" cy="-8" r="0.7"/>'
+    '<circle cx="0" cy="-6.5" r="0.7"/>'
     '</g>'
     '</g>'
     # "UBS" text in red serif
-    '<text x="40" y="20" font-family="Georgia,\'Times New Roman\',serif" '
-    'font-size="18" font-weight="700" fill="#E60000" letter-spacing="1">UBS</text>'
+    '<text x="38" y="23" font-family="Georgia,\'Times New Roman\',serif" '
+    'font-size="20" font-weight="700" fill="#E60000" letter-spacing="2">UBS</text>'
     '</svg>'
 )
 
