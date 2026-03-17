@@ -2,13 +2,13 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Multi-Chunking RAG Architecture</title>
+<title>Multi-Chunking RAG — Azure Infrastructure Architecture</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: 'Segoe UI', system-ui, sans-serif; background: #fff; }
   .canvas {
-    width: 1920px;
-    height: 1380px;
+    width: 1600px;
+    height: 1100px;
     position: relative;
     background: #fff;
   }
@@ -21,54 +21,36 @@
     text-align: center;
     z-index: 10;
   }
-  .nd .ic {
-    width: 72px; height: 72px;
-    display: flex; align-items: center; justify-content: center;
-    margin-bottom: 6px;
-  }
+  .nd .ic { width: 72px; height: 72px; display: flex; align-items: center; justify-content: center; margin-bottom: 6px; }
   .nd .ic svg { width: 64px; height: 64px; }
-  .nd .lb {
-    font-size: 14px;
-    font-weight: 700;
-    color: #333;
-    line-height: 1.25;
-    max-width: 150px;
-  }
-  .nd .sl {
-    font-size: 11px;
-    color: #767676;
-    max-width: 150px;
-    line-height: 1.2;
-  }
+  .nd .lb { font-size: 13px; font-weight: 700; color: #333; line-height: 1.25; max-width: 160px; }
+  .nd .sl { font-size: 10px; color: #767676; max-width: 160px; line-height: 1.2; }
 
   .ns {
     position: absolute;
-    border: 2px solid #c8c8c8;
-    border-radius: 4px;
+    border: 2px dashed #0078d4;
+    border-radius: 6px;
     z-index: 1;
-    background: #fff;
+    background: rgba(255,255,255,0.5);
   }
-  .ns.dashed { border-style: dashed; border-color: #0078d4; }
-  .ns.dashed-teal { border-style: dashed; border-color: #008272; }
-  .ns.dashed-orange { border-style: dashed; border-color: #d83b01; }
   .ns .ntitle {
     position: absolute;
     top: 8px; left: 14px;
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 700;
     color: #333;
   }
   .ns .nsub {
     position: absolute;
-    bottom: 8px; left: 14px;
-    font-size: 11px;
-    color: #999;
+    bottom: 6px; right: 12px;
+    font-size: 10px;
+    color: #aaa;
     font-style: italic;
   }
 
   .albl {
     position: absolute;
-    font-size: 11px;
+    font-size: 10px;
     color: #555;
     z-index: 15;
     white-space: nowrap;
@@ -76,9 +58,8 @@
   }
 
   svg.ov {
-    position: absolute;
-    top: 0; left: 0;
-    width: 1920px; height: 1380px;
+    position: absolute; top: 0; left: 0;
+    width: 1600px; height: 1100px;
     z-index: 5;
     pointer-events: none;
   }
@@ -87,122 +68,115 @@
 <body>
 <div class="canvas">
 
-  <svg class="ov" viewBox="0 0 1920 1380">
+  <svg class="ov" viewBox="0 0 1600 1100">
     <defs>
       <marker id="ah" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#333"/></marker>
-      <marker id="ahb" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#0078d4"/></marker>
-      <marker id="aho" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#d83b01"/></marker>
+      <marker id="ahd" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#666"/></marker>
     </defs>
 
-    <!-- Users → Streamlit -->
-    <line x1="195" y1="355" x2="315" y2="355" stroke="#333" stroke-width="3" marker-end="url(#ah)"/>
-    <!-- Streamlit → Router -->
-    <line x1="430" y1="355" x2="545" y2="355" stroke="#333" stroke-width="3" marker-end="url(#ah)"/>
-    <!-- Router → Orchestrator -->
-    <line x1="700" y1="355" x2="810" y2="355" stroke="#333" stroke-width="2.5" marker-end="url(#ah)"/>
-    <!-- Orchestrator → Retriever -->
-    <line x1="870" y1="405" x2="870" y2="490" stroke="#333" stroke-width="2.5" marker-end="url(#ah)"/>
-    <!-- Orchestrator → Extractor -->
-    <line x1="940" y1="355" x2="1060" y2="355" stroke="#008272" stroke-width="2.5" marker-end="url(#ah)"/>
-    <!-- Retriever → Synthesiser -->
-    <line x1="940" y1="540" x2="1060" y2="540" stroke="#333" stroke-width="2.5" marker-end="url(#ah)"/>
-    <!-- Synthesiser → Verifier -->
-    <line x1="1180" y1="540" x2="1280" y2="540" stroke="#333" stroke-width="2" stroke-dasharray="8 5" marker-end="url(#ah)"/>
-    <!-- Extractor → Transformer -->
-    <line x1="1130" y1="405" x2="1130" y2="490" stroke="#008272" stroke-width="2" marker-end="url(#ah)"/>
+    <!-- Client Apps → App Gateway -->
+    <line x1="165" y1="250" x2="295" y2="250" stroke="#333" stroke-width="3" marker-end="url(#ah)"/>
 
-    <!-- Model Gateway → OpenAI -->
-    <line x1="940" y1="175" x2="1560" y2="175" stroke="#0078d4" stroke-width="2.5" marker-end="url(#ahb)"/>
+    <!-- App Gateway → AKS: Front end (Streamlit) -->
+    <line x1="430" y1="250" x2="525" y2="250" stroke="#333" stroke-width="3" marker-end="url(#ah)"/>
 
-    <!-- Synthesiser → Model Gateway (up) -->
-    <path d="M 1130 500 Q 1200 400 1200 300 Q 1200 200 940 200" fill="none" stroke="#8661c5" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#ah)"/>
+    <!-- Streamlit Pod → Agent Pods -->
+    <line x1="660" y1="250" x2="755" y2="250" stroke="#333" stroke-width="2.5" marker-end="url(#ah)"/>
 
-    <!-- To PostgreSQL (right side) -->
-    <line x1="870" y1="590" x2="870" y2="640" stroke="#333" stroke-width="2"/>
-    <line x1="870" y1="640" x2="1600" y2="640" stroke="#333" stroke-width="2.5"/>
-    <line x1="1600" y1="640" x2="1600" y2="290" stroke="#333" stroke-width="2.5" marker-end="url(#ah)"/>
+    <!-- Agent Pods → PostgreSQL -->
+    <line x1="930" y1="250" x2="1230" y2="175" stroke="#333" stroke-width="2.5" marker-end="url(#ah)"/>
 
-    <!-- ── Ingestion ── -->
-    <line x1="195" y1="830" x2="380" y2="830" stroke="#333" stroke-width="2.5" marker-end="url(#ah)"/>
-    <line x1="490" y1="830" x2="570" y2="780" stroke="#d83b01" stroke-width="2.5" marker-end="url(#aho)"/>
-    <line x1="490" y1="860" x2="570" y2="920" stroke="#d83b01" stroke-width="2" stroke-dasharray="8 5" marker-end="url(#aho)"/>
-    <line x1="720" y1="770" x2="810" y2="770" stroke="#d83b01" stroke-width="2.5" marker-end="url(#aho)"/>
-    <line x1="940" y1="770" x2="1030" y2="770" stroke="#d83b01" stroke-width="2.5" marker-end="url(#aho)"/>
-    <!-- ModernBERT → PostgreSQL -->
-    <line x1="1130" y1="770" x2="1600" y2="770" stroke="#d83b01" stroke-width="2"/>
-    <line x1="1600" y1="770" x2="1600" y2="360" stroke="#d83b01" stroke-width="2" marker-end="url(#aho)"/>
+    <!-- Agent Pods → Azure OpenAI -->
+    <line x1="930" y1="250" x2="1230" y2="310" stroke="#333" stroke-width="2.5" marker-end="url(#ah)"/>
 
-    <!-- Dev → Feedback -->
-    <line x1="195" y1="1130" x2="370" y2="1130" stroke="#333" stroke-width="3" marker-end="url(#ah)"/>
-    <!-- Feedback → retraining (to storage) -->
-    <line x1="525" y1="1100" x2="525" y2="1060" stroke="#333" stroke-width="1.5" stroke-dasharray="6 4"/>
+    <!-- Agent Pods → Pod Autoscaling -->
+    <line x1="870" y1="300" x2="970" y2="350" stroke="#666" stroke-width="2" stroke-dasharray="8 5" marker-end="url(#ahd)"/>
 
-    <!-- Message Bus horizontal -->
-    <line x1="590" y1="175" x2="800" y2="175" stroke="#8661c5" stroke-width="2" stroke-dasharray="8 5"/>
+    <!-- Streamlit → Blob Storage (upload) -->
+    <line x1="610" y1="300" x2="610" y2="380" stroke="#333" stroke-width="2" stroke-dasharray="8 5"/>
+    <line x1="610" y1="380" x2="1230" y2="380" stroke="#333" stroke-width="2" marker-end="url(#ah)"/>
+
+    <!-- Ingestion Worker → Document Intelligence -->
+    <line x1="845" y1="510" x2="1230" y2="460" stroke="#333" stroke-width="2.5" marker-end="url(#ah)"/>
+
+    <!-- Ingestion Worker → PostgreSQL (store chunks) -->
+    <line x1="900" y1="480" x2="1230" y2="195" stroke="#333" stroke-width="2" stroke-dasharray="8 5" marker-end="url(#ahd)"/>
+
+    <!-- Ingestion Worker → Blob (read PDFs) -->
+    <line x1="900" y1="510" x2="1230" y2="400" stroke="#666" stroke-width="1.5" stroke-dasharray="6 4"/>
+
+    <!-- Redis ← Agent Pods -->
+    <line x1="810" y1="510" x2="680" y2="510" stroke="#333" stroke-width="2" marker-end="url(#ah)"/>
+
+    <!-- Kafka ← Agent Pods (message bus) -->
+    <line x1="810" y1="540" x2="680" y2="570" stroke="#666" stroke-width="2" stroke-dasharray="8 5" marker-end="url(#ahd)"/>
+
+    <!-- CI/CD Pipeline -->
+    <!-- Azure Pipelines → ACR -->
+    <line x1="240" y1="640" x2="370" y2="640" stroke="#333" stroke-width="2.5" stroke-dasharray="8 5" marker-end="url(#ah)"/>
+    <!-- ACR → AKS (Docker pull) -->
+    <line x1="480" y1="640" x2="560" y2="560" stroke="#333" stroke-width="2.5" stroke-dasharray="8 5" marker-end="url(#ah)"/>
+
+    <!-- Dev/Ops → Azure Pipelines -->
+    <line x1="165" y1="870" x2="165" y2="700" stroke="#333" stroke-width="3" marker-end="url(#ah)"/>
+
+    <!-- Dev/Ops → Entra ID -->
+    <line x1="240" y1="880" x2="540" y2="880" stroke="#333" stroke-width="3" marker-end="url(#ah)"/>
+
+    <!-- Entra ID → AKS (RBAC) -->
+    <line x1="610" y1="850" x2="610" y2="580" stroke="#666" stroke-width="2" stroke-dasharray="8 5"/>
+
+    <!-- App Insights ← AKS (telemetry) -->
+    <line x1="750" y1="580" x2="810" y2="850" stroke="#666" stroke-width="1.5" stroke-dasharray="6 4"/>
+
+    <!-- Key Vault ← AKS (secrets) -->
+    <line x1="700" y1="570" x2="1010" y2="850" stroke="#666" stroke-width="1.5" stroke-dasharray="6 4"/>
+
+    <!-- VNet border label line -->
+    <line x1="1155" y1="590" x2="1155" y2="130" stroke="#0078d4" stroke-width="1.5" stroke-dasharray="5 3" opacity="0.4"/>
   </svg>
 
   <!-- ═══════════════ TITLE ═══════════════ -->
-  <div class="nd" style="left:800px;top:25px;">
+  <div class="nd" style="left:560px;top:18px;">
     <div class="ic">
       <svg viewBox="0 0 80 80">
-        <rect x="15" y="5" width="22" height="22" rx="3" fill="#5c2d91" transform="rotate(-10 26 16)"/>
-        <rect x="38" y="5" width="22" height="22" rx="3" fill="#8661c5" transform="rotate(5 49 16)"/>
-        <rect x="10" y="30" width="22" height="22" rx="3" fill="#0078d4"/>
-        <rect x="38" y="30" width="22" height="22" rx="3" fill="#50b0f0"/>
-        <rect x="22" y="52" width="22" height="22" rx="3" fill="#003f72"/>
-        <rect x="45" y="48" width="22" height="22" rx="3" fill="#0078d4"/>
+        <rect x="12" y="5" width="24" height="24" rx="3" fill="#5c2d91" transform="rotate(-8 24 17)"/>
+        <rect x="38" y="5" width="24" height="24" rx="3" fill="#8661c5" transform="rotate(5 50 17)"/>
+        <rect x="8" y="32" width="24" height="24" rx="3" fill="#0078d4"/>
+        <rect x="38" y="32" width="24" height="24" rx="3" fill="#50b0f0"/>
+        <rect x="22" y="54" width="24" height="20" rx="3" fill="#003f72"/>
+        <rect x="48" y="50" width="20" height="20" rx="3" fill="#0078d4"/>
       </svg>
     </div>
-    <span class="lb" style="font-size:20px;max-width:500px;">Multi-Chunking RAG Platform</span>
-    <span class="sl" style="max-width:500px;">Agentic Intelligent Document Processing · Evidence-Grounded Financial Analysis</span>
+    <span class="lb" style="font-size:20px;max-width:500px;">Azure Kubernetes Service (AKS)</span>
+    <span class="sl" style="max-width:500px;">Multi-Chunking RAG Platform</span>
   </div>
 
-  <!-- ═══════════════ NAMESPACE BOXES ═══════════════ -->
-
-  <!-- Platform Services (top bar) -->
-  <div class="ns" style="left:450px;top:130px;width:630px;height:100px;border-color:#8661c5;">
-    <span class="ntitle" style="color:#8661c5;font-size:13px;">Platform Services</span>
+  <!-- ═══════════════ AKS CLUSTER BOX ═══════════════ -->
+  <div class="ns" style="left:490px;top:115px;width:680px;height:470px;">
+    <span class="nsub">Virtual network</span>
   </div>
 
-  <!-- Agent Framework (main dashed box) -->
-  <div class="ns dashed" style="left:530px;top:265px;width:850px;height:360px;">
+  <!-- Front end namespace -->
+  <div class="ns" style="left:510px;top:140px;width:180px;height:210px;border-style:solid;border-color:#c8c8c8;background:#fff;">
+    <span class="ntitle">Front end</span>
+    <span class="nsub">Namespace</span>
   </div>
 
-  <!-- Query Routing (inside) -->
-  <div class="ns" style="left:545px;top:280px;width:170px;height:200px;">
-    <span class="ntitle" style="font-size:13px;">Query Routing</span>
-    <span class="nsub">Intent classification</span>
+  <!-- Back-end services namespace -->
+  <div class="ns" style="left:710px;top:140px;width:250px;height:210px;border-style:solid;border-color:#c8c8c8;background:#fff;">
+    <span class="ntitle">Back-end services</span>
+    <span class="nsub">Namespace</span>
   </div>
 
-  <!-- Core Agent Services -->
-  <div class="ns" style="left:730px;top:280px;width:640px;height:335px;">
-    <span class="ntitle" style="font-size:13px;">Core Agent Services</span>
-    <span class="nsub">Evidence-only synthesis · §2.3</span>
+  <!-- Utility services namespace -->
+  <div class="ns" style="left:510px;top:400px;width:450px;height:175px;border-style:solid;border-color:#c8c8c8;background:#fff;">
+    <span class="ntitle">Utility services</span>
+    <span class="nsub">Namespace</span>
   </div>
 
-  <!-- Extraction sub-box -->
-  <div class="ns dashed-teal" style="left:1040px;top:300px;width:310px;height:140px;">
-    <span class="ntitle" style="color:#008272;font-size:12px;">Extraction & Transform (§10)</span>
-  </div>
-
-  <!-- Ingestion Pipeline box -->
-  <div class="ns" style="left:350px;top:700px;width:830px;height:280px;">
-    <span class="ntitle">Ingestion & Embedding Pipeline</span>
-    <span class="nsub">Late chunking · §2.2</span>
-  </div>
-
-  <!-- Feedback box -->
-  <div class="ns dashed-orange" style="left:360px;top:1070px;width:200px;height:130px;">
-    <span class="ntitle" style="color:#d83b01;font-size:13px;">Feedback Loop</span>
-  </div>
-
-  <!-- External services label -->
-  <div style="position:absolute;left:1530px;top:130px;font-size:16px;font-weight:700;color:#333;z-index:15;text-align:center;width:140px;">External<br>data stores</div>
-
-  <!-- ═══════════════ CLIENT SIDE ═══════════════ -->
-
-  <!-- Users -->
-  <div class="nd" style="left:95px;top:300px;">
+  <!-- ═══════════════ CLIENT APPS ═══════════════ -->
+  <div class="nd" style="left:80px;top:200px;">
     <div class="ic">
       <svg viewBox="0 0 80 80">
         <rect x="8" y="5" width="64" height="48" rx="4" fill="#50b0f0" stroke="#0078d4" stroke-width="2"/>
@@ -210,100 +184,45 @@
         <rect x="30" y="53" width="20" height="4" rx="1" fill="#0078d4"/>
         <rect x="25" y="57" width="30" height="3" rx="1" fill="#999"/>
         <line x1="20" y1="20" x2="58" y2="20" stroke="#0078d4" stroke-width="2"/>
-        <line x1="20" y1="27" x2="48" y2="27" stroke="#ccc" stroke-width="1.5"/>
-        <line x1="20" y1="33" x2="52" y2="33" stroke="#ccc" stroke-width="1.5"/>
+        <line x1="20" y1="27" x2="48" y2="27" stroke="#ddd" stroke-width="1.5"/>
+        <line x1="20" y1="33" x2="52" y2="33" stroke="#ddd" stroke-width="1.5"/>
       </svg>
     </div>
-    <span class="lb">Client Apps</span>
+    <span class="lb">Client apps</span>
     <span class="sl">Financial analysts</span>
   </div>
 
-  <!-- Streamlit UI -->
-  <div class="nd" style="left:320px;top:300px;">
+  <!-- ═══════════════ APP GATEWAY / LOAD BALANCER ═══════════════ -->
+  <div class="nd" style="left:310px;top:200px;">
     <div class="ic">
       <svg viewBox="0 0 80 80">
         <polygon points="40,5 75,25 75,55 40,75 5,55 5,25" fill="#0078d4"/>
         <polygon points="40,15 65,30 65,50 40,65 15,50 15,30" fill="#fff"/>
-        <text x="40" y="46" text-anchor="middle" font-size="14" font-weight="bold" fill="#0078d4">UI</text>
+        <polygon points="40,22 55,32 55,45 40,55 25,45 25,32" fill="#0078d4" opacity="0.3"/>
+        <circle cx="40" cy="40" r="8" fill="#0078d4"/>
+        <path d="M36 40 L44 40 M40 36 L40 44" stroke="#fff" stroke-width="2"/>
       </svg>
     </div>
-    <span class="lb">Streamlit UI</span>
-    <span class="sl">+ streamlit-pdf-viewer</span>
+    <span class="lb">Azure Application<br>Gateway</span>
   </div>
 
-  <!-- ═══════════════ PLATFORM SERVICES ROW ═══════════════ -->
-
-  <!-- Message Bus -->
-  <div class="nd" style="left:470px;top:140px;">
-    <div class="ic" style="width:60px;height:60px;">
-      <svg viewBox="0 0 80 80" style="width:52px;height:52px;">
-        <rect x="8" y="18" width="64" height="44" rx="5" fill="#5c2d91"/>
-        <path d="M8 28 L40 48 L72 28" stroke="#fff" stroke-width="2.5" fill="none"/>
-      </svg>
-    </div>
-    <span class="lb" style="font-size:12px;">Message Bus</span>
-  </div>
-
-  <!-- Model Gateway -->
-  <div class="nd" style="left:810px;top:135px;">
-    <div class="ic" style="width:60px;height:60px;">
-      <svg viewBox="0 0 80 80" style="width:52px;height:52px;">
-        <circle cx="40" cy="40" r="28" fill="#8661c5"/>
-        <circle cx="40" cy="40" r="18" fill="#fff"/>
-        <circle cx="40" cy="40" r="10" fill="#8661c5"/>
-        <path d="M40 16 L40 8 M58 28 L64 22 M58 52 L64 58 M40 64 L40 72 M22 52 L16 58 M22 28 L16 22" stroke="#8661c5" stroke-width="2.5" stroke-linecap="round"/>
-      </svg>
-    </div>
-    <span class="lb" style="font-size:12px;">Model Gateway</span>
-  </div>
-
-  <!-- Prompt Registry -->
-  <div class="nd" style="left:920px;top:135px;">
-    <div class="ic" style="width:60px;height:60px;">
-      <svg viewBox="0 0 80 80" style="width:52px;height:52px;">
-        <rect x="18" y="10" width="44" height="55" rx="3" fill="#5c2d91"/>
-        <rect x="24" y="16" width="32" height="5" rx="1" fill="#fff" opacity="0.8"/>
-        <rect x="24" y="24" width="32" height="5" rx="1" fill="#fff" opacity="0.6"/>
-        <rect x="24" y="32" width="32" height="5" rx="1" fill="#fff" opacity="0.4"/>
-        <rect x="24" y="40" width="32" height="5" rx="1" fill="#fff" opacity="0.3"/>
-        <circle cx="52" cy="56" r="12" fill="#ffb900"/>
-        <text x="52" y="61" text-anchor="middle" font-size="12" font-weight="bold" fill="#fff">v</text>
-      </svg>
-    </div>
-    <span class="lb" style="font-size:12px;">Prompt Registry</span>
-  </div>
-
-  <!-- Audit Log -->
-  <div class="nd" style="left:1030px;top:135px;">
-    <div class="ic" style="width:60px;height:60px;">
-      <svg viewBox="0 0 80 80" style="width:52px;height:52px;">
-        <rect x="15" y="8" width="50" height="60" rx="3" fill="#002050"/>
-        <path d="M25 22 L55 22 M25 32 L55 32 M25 42 L55 42 M25 52 L45 52" stroke="#fff" stroke-width="2" opacity="0.7"/>
-        <circle cx="55" cy="56" r="12" fill="#0078d4"/>
-        <path d="M50 56 L54 60 L62 52" stroke="#fff" stroke-width="2" fill="none"/>
-      </svg>
-    </div>
-    <span class="lb" style="font-size:12px;">Audit Log</span>
-  </div>
-
-  <!-- ═══════════════ AGENT FRAMEWORK ═══════════════ -->
-
-  <!-- Router -->
-  <div class="nd" style="left:575px;top:310px;">
+  <!-- ═══════════════ STREAMLIT POD (Ingress/Front end) ═══════════════ -->
+  <div class="nd" style="left:540px;top:180px;">
     <div class="ic">
       <svg viewBox="0 0 80 80">
-        <circle cx="40" cy="40" r="32" fill="#fff" stroke="#0078d4" stroke-width="3"/>
-        <circle cx="40" cy="40" r="22" fill="#0078d4"/>
-        <text x="40" y="36" text-anchor="middle" font-size="10" font-weight="bold" fill="#fff">R</text>
-        <path d="M30 48 L40 38 L50 48" stroke="#fff" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+        <circle cx="40" cy="40" r="30" fill="#fff" stroke="#0078d4" stroke-width="3"/>
+        <circle cx="40" cy="40" r="20" fill="#0078d4"/>
+        <text x="40" y="36" text-anchor="middle" font-size="9" font-weight="bold" fill="#fff">S</text>
+        <text x="40" y="48" text-anchor="middle" font-size="8" fill="#fff">UI</text>
       </svg>
     </div>
-    <span class="lb">Router Agent</span>
-    <span class="sl">7 intent types</span>
+    <span class="lb">Streamlit App</span>
+    <span class="sl">Ingress</span>
   </div>
 
-  <!-- Orchestrator -->
-  <div class="nd" style="left:810px;top:295px;">
+  <!-- ═══════════════ AGENT SERVICE PODS ═══════════════ -->
+  <!-- Pod 1 (Orchestrator/Router) -->
+  <div class="nd" style="left:745px;top:165px;">
     <div class="ic">
       <svg viewBox="0 0 80 80">
         <polygon points="40,8 72,24 72,56 40,72 8,56 8,24" fill="#0078d4"/>
@@ -312,55 +231,12 @@
         <polygon points="40,40 8,24 8,56 40,72" fill="#0078d4"/>
       </svg>
     </div>
-    <span class="lb">Orchestrator</span>
-    <span class="sl">ReAct loop · Tier-1</span>
+    <span class="lb">Agent Services</span>
+    <span class="sl">Orchestrator · Router<br>Synthesiser · Verifier</span>
   </div>
 
-  <!-- Retriever -->
-  <div class="nd" style="left:810px;top:480px;">
-    <div class="ic">
-      <svg viewBox="0 0 80 80">
-        <polygon points="40,8 72,24 72,56 40,72 8,56 8,24" fill="#107c10"/>
-        <polygon points="40,8 72,24 40,40 8,24" fill="#6dc06d"/>
-        <polygon points="40,40 72,24 72,56 40,72" fill="#0b5a08"/>
-        <polygon points="40,40 8,24 8,56 40,72" fill="#107c10"/>
-      </svg>
-    </div>
-    <span class="lb">Retriever Agent</span>
-    <span class="sl">Locate → Select → Rerank</span>
-  </div>
-
-  <!-- Synthesiser -->
-  <div class="nd" style="left:1070px;top:480px;">
-    <div class="ic">
-      <svg viewBox="0 0 80 80">
-        <polygon points="40,8 72,24 72,56 40,72 8,56 8,24" fill="#107c10"/>
-        <polygon points="40,8 72,24 40,40 8,24" fill="#6dc06d"/>
-        <polygon points="40,40 72,24 72,56 40,72" fill="#0b5a08"/>
-        <polygon points="40,40 8,24 8,56 40,72" fill="#107c10"/>
-        <circle cx="40" cy="36" r="10" fill="#fff"/>
-        <path d="M35 36 L39 40 L46 32" stroke="#107c10" stroke-width="2.5" fill="none"/>
-      </svg>
-    </div>
-    <span class="lb">Synthesiser</span>
-    <span class="sl">Evidence-only · Tier-2</span>
-  </div>
-
-  <!-- Verifier -->
-  <div class="nd" style="left:1280px;top:480px;">
-    <div class="ic">
-      <svg viewBox="0 0 80 80">
-        <path d="M40 6 L70 22 L70 50 C70 62 56 74 40 78 C24 74 10 62 10 50 L10 22 Z" fill="#e81123"/>
-        <path d="M40 16 L60 28 L60 48 C60 56 50 65 40 68 C30 65 20 56 20 48 L20 28 Z" fill="#fff"/>
-        <path d="M33 44 L38 49 L48 36" stroke="#e81123" stroke-width="3.5" fill="none" stroke-linecap="round"/>
-      </svg>
-    </div>
-    <span class="lb">Verifier Agent</span>
-    <span class="sl">Claim verification</span>
-  </div>
-
-  <!-- Extractor -->
-  <div class="nd" style="left:1070px;top:310px;">
+  <!-- Pod 2 (Retriever/Extractor) -->
+  <div class="nd" style="left:880px;top:165px;">
     <div class="ic">
       <svg viewBox="0 0 80 80">
         <polygon points="40,8 72,24 72,56 40,72 8,56 8,24" fill="#008272"/>
@@ -369,30 +245,75 @@
         <polygon points="40,40 8,24 8,56 40,72" fill="#008272"/>
       </svg>
     </div>
-    <span class="lb">Extractor Agent</span>
-    <span class="sl">Schema-driven · §10.1</span>
+    <span class="lb">Retrieval &<br>Extraction</span>
+    <span class="sl">Retriever · Extractor<br>Transformer</span>
   </div>
 
-  <!-- Transformer -->
-  <div class="nd" style="left:1230px;top:310px;">
-    <div class="ic">
-      <svg viewBox="0 0 80 80">
-        <polygon points="40,8 72,24 72,56 40,72 8,56 8,24" fill="#008272"/>
-        <polygon points="40,8 72,24 40,40 8,24" fill="#00b7c3"/>
-        <polygon points="40,40 72,24 72,56 40,72" fill="#005e54"/>
-        <polygon points="40,40 8,24 8,56 40,72" fill="#008272"/>
-        <circle cx="40" cy="36" r="10" fill="#fff"/>
-        <path d="M33 36 L47 36 M44 31 L49 36 L44 41" stroke="#008272" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <!-- Pod autoscaling -->
+  <div class="nd" style="left:950px;top:310px;">
+    <div class="ic" style="width:56px;height:56px;">
+      <svg viewBox="0 0 64 64" style="width:48px;height:48px;">
+        <circle cx="32" cy="32" r="26" fill="none" stroke="#0078d4" stroke-width="2.5" stroke-dasharray="6 3"/>
+        <polygon points="32,10 52,22 52,42 32,54 12,42 12,22" fill="#0078d4" opacity="0.12"/>
+        <polygon points="32,16 46,24 46,40 32,48 18,40 18,24" fill="#0078d4" opacity="0.2"/>
       </svg>
     </div>
-    <span class="lb">Transformer</span>
-    <span class="sl">MCP normalization · §10.2</span>
+    <span class="lb" style="font-size:11px;">Pod<br>autoscaling</span>
+  </div>
+
+  <!-- ═══════════════ UTILITY SERVICES ═══════════════ -->
+
+  <!-- Redis -->
+  <div class="nd" style="left:545px;top:430px;">
+    <div class="ic">
+      <svg viewBox="0 0 80 80">
+        <polygon points="40,8 72,24 72,56 40,72 8,56 8,24" fill="#c6302b"/>
+        <polygon points="40,8 72,24 40,40 8,24" fill="#e84d3a"/>
+        <polygon points="40,40 72,24 72,56 40,72" fill="#9b1d1d"/>
+        <polygon points="40,40 8,24 8,56 40,72" fill="#c6302b"/>
+        <text x="40" y="42" text-anchor="middle" font-size="9" font-weight="bold" fill="#fff">REDIS</text>
+      </svg>
+    </div>
+    <span class="lb">Azure Cache<br>for Redis</span>
+    <span class="sl">Working memory</span>
+  </div>
+
+  <!-- Kafka / Event Hubs -->
+  <div class="nd" style="left:545px;top:520px;">
+    <div class="ic" style="width:56px;height:56px;">
+      <svg viewBox="0 0 64 64" style="width:48px;height:48px;">
+        <circle cx="32" cy="32" r="26" fill="#003f72"/>
+        <circle cx="32" cy="24" r="6" fill="#fff"/>
+        <circle cx="22" cy="40" r="5" fill="#fff" opacity="0.8"/>
+        <circle cx="42" cy="40" r="5" fill="#fff" opacity="0.8"/>
+        <line x1="32" y1="30" x2="22" y2="36" stroke="#fff" stroke-width="1.5"/>
+        <line x1="32" y1="30" x2="42" y2="36" stroke="#fff" stroke-width="1.5"/>
+      </svg>
+    </div>
+    <span class="lb">Azure Event Hubs<br>(Kafka)</span>
+    <span class="sl">Message bus</span>
+  </div>
+
+  <!-- Ingestion Worker Pods -->
+  <div class="nd" style="left:810px;top:440px;">
+    <div class="ic">
+      <svg viewBox="0 0 80 80">
+        <polygon points="40,8 72,24 72,56 40,72 8,56 8,24" fill="#d83b01"/>
+        <polygon points="40,8 72,24 40,40 8,24" fill="#ff8c4c"/>
+        <polygon points="40,40 72,24 72,56 40,72" fill="#a02c00"/>
+        <polygon points="40,40 8,24 8,56 40,72" fill="#d83b01"/>
+      </svg>
+    </div>
+    <span class="lb">Ingestion Workers</span>
+    <span class="sl">PDF parsing · Embedding<br>Late chunking</span>
   </div>
 
   <!-- ═══════════════ EXTERNAL DATA STORES ═══════════════ -->
 
-  <!-- PostgreSQL -->
-  <div class="nd" style="left:1555px;top:195px;">
+  <div style="position:absolute;left:1240px;top:110px;font-size:16px;font-weight:700;color:#333;z-index:15;text-align:center;width:160px;">External<br>data stores</div>
+
+  <!-- Azure Database for PostgreSQL -->
+  <div class="nd" style="left:1240px;top:145px;">
     <div class="ic">
       <svg viewBox="0 0 80 80">
         <rect x="12" y="15" width="56" height="50" fill="#336791"/>
@@ -400,15 +321,15 @@
         <ellipse cx="40" cy="65" rx="28" ry="10" fill="#336791" stroke="#254a6e" stroke-width="1"/>
         <line x1="12" y1="15" x2="12" y2="65" stroke="#254a6e" stroke-width="1"/>
         <line x1="68" y1="15" x2="68" y2="65" stroke="#254a6e" stroke-width="1"/>
-        <text x="40" y="46" text-anchor="middle" font-size="14" font-weight="bold" fill="#fff">SQL</text>
+        <text x="40" y="44" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">pgvector</text>
       </svg>
     </div>
-    <span class="lb">PostgreSQL 14<br>+ pgvector</span>
-    <span class="sl">HNSW · 17 tables</span>
+    <span class="lb">Azure Database<br>for PostgreSQL</span>
+    <span class="sl">+ pgvector · HNSW</span>
   </div>
 
-  <!-- OpenAI -->
-  <div class="nd" style="left:1690px;top:195px;">
+  <!-- Azure OpenAI -->
+  <div class="nd" style="left:1240px;top:270px;">
     <div class="ic">
       <svg viewBox="0 0 80 80">
         <circle cx="40" cy="40" r="30" fill="none" stroke="#10a37f" stroke-width="2"/>
@@ -418,108 +339,99 @@
         <circle cx="40" cy="40" r="8" fill="#10a37f"/>
       </svg>
     </div>
-    <span class="lb">OpenAI /<br>Azure OpenAI</span>
+    <span class="lb">Azure OpenAI<br>Service</span>
     <span class="sl">GPT-4o · GPT-4o-mini</span>
   </div>
 
-  <!-- ═══════════════ INGESTION ROW ═══════════════ -->
-
-  <!-- PDF Upload -->
-  <div class="nd" style="left:95px;top:775px;">
+  <!-- Azure Blob Storage -->
+  <div class="nd" style="left:1240px;top:370px;">
     <div class="ic">
       <svg viewBox="0 0 80 80">
-        <rect x="8" y="8" width="64" height="64" rx="6" fill="#d83b01"/>
-        <path d="M25 35 L40 20 L55 35 M40 20 L40 55" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round"/>
-        <line x1="22" y1="58" x2="58" y2="58" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+        <rect x="10" y="20" width="60" height="44" rx="5" fill="#0078d4"/>
+        <rect x="18" y="28" width="16" height="12" rx="2" fill="#fff" opacity="0.9"/>
+        <rect x="38" y="28" width="16" height="12" rx="2" fill="#fff" opacity="0.7"/>
+        <rect x="18" y="44" width="16" height="12" rx="2" fill="#fff" opacity="0.5"/>
+        <rect x="38" y="44" width="16" height="12" rx="2" fill="#fff" opacity="0.4"/>
+        <circle cx="60" cy="20" r="10" fill="#50b0f0"/>
+        <text x="60" y="24" text-anchor="middle" font-size="10" font-weight="bold" fill="#fff">B</text>
       </svg>
     </div>
-    <span class="lb">PDF / Document<br>Upload</span>
-    <span class="sl">Multi-format</span>
+    <span class="lb">Azure Blob<br>Storage</span>
+    <span class="sl">PDF documents</span>
   </div>
 
-  <!-- Ingestion Pipeline -->
-  <div class="nd" style="left:380px;top:775px;">
+  <!-- Azure Document Intelligence -->
+  <div class="nd" style="left:1240px;top:460px;">
     <div class="ic">
       <svg viewBox="0 0 80 80">
-        <rect x="8" y="12" width="64" height="56" rx="5" fill="#d83b01"/>
-        <rect x="14" y="20" width="20" height="16" rx="2" fill="#fff" opacity="0.9"/>
-        <rect x="38" y="20" width="20" height="16" rx="2" fill="#fff" opacity="0.7"/>
-        <rect x="14" y="40" width="20" height="14" rx="2" fill="#fff" opacity="0.5"/>
-        <rect x="38" y="40" width="20" height="14" rx="2" fill="#fff" opacity="0.4"/>
-        <circle cx="62" cy="58" r="10" fill="#ffb900"/>
-        <text x="62" y="62" text-anchor="middle" font-size="9" font-weight="bold" fill="#fff">T</text>
-      </svg>
-    </div>
-    <span class="lb">Ingestion Pipeline</span>
-    <span class="sl">Page triage · Canonicalize</span>
-  </div>
-
-  <!-- PDF Parsers -->
-  <div class="nd" style="left:590px;top:720px;">
-    <div class="ic">
-      <svg viewBox="0 0 80 80">
-        <polygon points="40,8 72,24 72,56 40,72 8,56 8,24" fill="#e85d26"/>
-        <polygon points="40,8 72,24 40,40 8,24" fill="#ff8c4c"/>
-        <polygon points="40,40 72,24 72,56 40,72" fill="#c43e00"/>
-        <polygon points="40,40 8,24 8,56 40,72" fill="#e85d26"/>
-        <text x="40" y="42" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">PDF</text>
-      </svg>
-    </div>
-    <span class="lb">PDF Parsers</span>
-    <span class="sl">PyMUPDF · Docling</span>
-  </div>
-
-  <!-- Azure DI -->
-  <div class="nd" style="left:590px;top:870px;">
-    <div class="ic">
-      <svg viewBox="0 0 80 80">
-        <polygon points="40,8 72,24 72,56 40,72 8,56 8,24" fill="#0078d4"/>
-        <polygon points="40,8 72,24 40,40 8,24" fill="#50b0f0"/>
-        <polygon points="40,40 72,24 72,56 40,72" fill="#003f72"/>
-        <polygon points="40,40 8,24 8,56 40,72" fill="#0078d4"/>
-        <text x="40" y="42" text-anchor="middle" font-size="10" font-weight="bold" fill="#fff">DI</text>
+        <rect x="10" y="10" width="60" height="60" rx="6" fill="#0078d4"/>
+        <rect x="18" y="18" width="20" height="14" rx="2" fill="#fff" opacity="0.9"/>
+        <rect x="42" y="18" width="20" height="14" rx="2" fill="#fff" opacity="0.7"/>
+        <line x1="18" y1="40" x2="62" y2="40" stroke="#fff" stroke-width="2" opacity="0.6"/>
+        <line x1="18" y1="48" x2="50" y2="48" stroke="#fff" stroke-width="2" opacity="0.4"/>
+        <line x1="18" y1="56" x2="55" y2="56" stroke="#fff" stroke-width="2" opacity="0.3"/>
+        <circle cx="62" cy="62" r="10" fill="#ffb900"/>
+        <text x="62" y="66" text-anchor="middle" font-size="9" font-weight="bold" fill="#fff">AI</text>
       </svg>
     </div>
     <span class="lb">Azure Document<br>Intelligence</span>
-    <span class="sl">Tables · Figures</span>
+    <span class="sl">OCR · Table extraction</span>
   </div>
 
-  <!-- Late Chunking -->
-  <div class="nd" style="left:820px;top:720px;">
-    <div class="ic">
-      <svg viewBox="0 0 80 80">
-        <rect x="6" y="14" width="22" height="22" rx="3" fill="#ffb900"/>
-        <rect x="30" y="14" width="22" height="22" rx="3" fill="#ffb900" opacity="0.8"/>
-        <rect x="54" y="14" width="18" height="22" rx="3" fill="#ffb900" opacity="0.6"/>
-        <rect x="6" y="40" width="30" height="22" rx="3" fill="#ff8c00"/>
-        <rect x="40" y="40" width="32" height="22" rx="3" fill="#ff8c00" opacity="0.7"/>
-        <line x1="6" y1="70" x2="72" y2="70" stroke="#ffb900" stroke-width="3" stroke-linecap="round"/>
-      </svg>
-    </div>
-    <span class="lb">Late Chunking</span>
-    <span class="sl">Macro ≤8192 · Child ~256</span>
+  <!-- ═══════════════ CI/CD PIPELINE (bottom left) ═══════════════ -->
+
+  <!-- CI/CD box -->
+  <div style="position:absolute;left:70px;top:580px;width:130px;height:140px;border:2px solid #c8c8c8;border-radius:4px;z-index:1;background:#fff;">
+    <span style="position:absolute;top:6px;left:10px;font-size:12px;font-weight:700;color:#333;">CI/CD</span>
   </div>
 
-  <!-- ModernBERT -->
-  <div class="nd" style="left:1040px;top:720px;">
+  <!-- Azure Pipelines -->
+  <div class="nd" style="left:90px;top:610px;">
     <div class="ic">
       <svg viewBox="0 0 80 80">
-        <polygon points="40,8 72,24 72,56 40,72 8,56 8,24" fill="#ff6f00"/>
-        <polygon points="40,8 72,24 40,40 8,24" fill="#ffab40"/>
-        <polygon points="40,40 72,24 72,56 40,72" fill="#c43e00"/>
-        <polygon points="40,40 8,24 8,56 40,72" fill="#ff6f00"/>
-        <text x="40" y="38" text-anchor="middle" font-size="9" font-weight="bold" fill="#fff">BERT</text>
-        <text x="40" y="48" text-anchor="middle" font-size="8" fill="#fff">768d</text>
+        <rect x="8" y="8" width="64" height="64" rx="6" fill="#0078d4"/>
+        <circle cx="30" cy="30" r="10" fill="#fff" opacity="0.9"/>
+        <circle cx="50" cy="30" r="8" fill="#fff" opacity="0.7"/>
+        <circle cx="30" cy="52" r="8" fill="#fff" opacity="0.6"/>
+        <circle cx="50" cy="50" r="10" fill="#fff" opacity="0.8"/>
+        <path d="M38 30 L42 30 M30 40 L30 44 M40 42 L44 46" stroke="#0078d4" stroke-width="2"/>
       </svg>
     </div>
-    <span class="lb">ModernBERT<br>Embedder</span>
-    <span class="sl">768-dim · CPU · Singleton</span>
+    <span class="lb">Azure Pipelines</span>
+  </div>
+
+  <!-- Azure Container Registry -->
+  <div class="nd" style="left:370px;top:590px;">
+    <div class="ic">
+      <svg viewBox="0 0 80 80">
+        <rect x="8" y="20" width="64" height="44" rx="5" fill="#0078d4"/>
+        <rect x="14" y="26" width="14" height="14" rx="1" fill="#fff" opacity="0.9"/>
+        <rect x="32" y="26" width="14" height="14" rx="1" fill="#fff" opacity="0.8"/>
+        <rect x="50" y="26" width="14" height="14" rx="1" fill="#fff" opacity="0.7"/>
+        <rect x="14" y="44" width="14" height="14" rx="1" fill="#fff" opacity="0.6"/>
+        <rect x="32" y="44" width="14" height="14" rx="1" fill="#fff" opacity="0.5"/>
+        <rect x="50" y="44" width="14" height="14" rx="1" fill="#fff" opacity="0.4"/>
+      </svg>
+    </div>
+    <span class="lb">Azure Container<br>Registry</span>
+  </div>
+
+  <!-- Kubernetes cluster icon (between ACR and AKS) -->
+  <div class="nd" style="left:460px;top:460px;">
+    <div class="ic" style="width:56px;height:56px;">
+      <svg viewBox="0 0 64 64" style="width:48px;height:48px;">
+        <circle cx="32" cy="32" r="26" fill="#326ce5"/>
+        <polygon points="32,10 50,20 50,44 32,54 14,44 14,20" fill="none" stroke="#fff" stroke-width="2"/>
+        <circle cx="32" cy="32" r="6" fill="#fff"/>
+      </svg>
+    </div>
+    <span class="lb" style="font-size:11px;">Kubernetes<br>cluster</span>
   </div>
 
   <!-- ═══════════════ BOTTOM ROW ═══════════════ -->
 
   <!-- Dev/Ops -->
-  <div class="nd" style="left:95px;top:1070px;">
+  <div class="nd" style="left:80px;top:830px;">
     <div class="ic">
       <svg viewBox="0 0 80 80">
         <circle cx="40" cy="25" r="16" fill="#00b7c3"/>
@@ -527,130 +439,65 @@
         <ellipse cx="40" cy="68" rx="28" ry="14" fill="#00b7c3"/>
       </svg>
     </div>
-    <span class="lb">Dev / Ops</span>
-    <span class="sl">Feedback & monitoring</span>
+    <span class="lb">Dev/Ops</span>
   </div>
 
-  <!-- Feedback Pipeline -->
-  <div class="nd" style="left:400px;top:1090px;">
-    <div class="ic">
-      <svg viewBox="0 0 80 80">
-        <circle cx="40" cy="40" r="28" fill="#fff" stroke="#d83b01" stroke-width="3"/>
-        <path d="M28 35 C28 25 52 25 52 35" stroke="#d83b01" stroke-width="2.5" fill="none"/>
-        <path d="M50 32 L55 37 L50 42" stroke="#d83b01" stroke-width="2.5" fill="none" stroke-linecap="round"/>
-        <path d="M52 45 C52 55 28 55 28 45" stroke="#d83b01" stroke-width="2.5" fill="none"/>
-        <path d="M30 48 L25 43 L30 38" stroke="#d83b01" stroke-width="2.5" fill="none" stroke-linecap="round"/>
-      </svg>
-    </div>
-    <span class="lb">Feedback Pipeline</span>
-    <span class="sl">Attribution · Retraining</span>
-  </div>
-
-  <!-- PDF Grounding -->
-  <div class="nd" style="left:680px;top:1090px;">
+  <!-- Azure Active Directory / Entra ID -->
+  <div class="nd" style="left:540px;top:830px;">
     <div class="ic">
       <svg viewBox="0 0 80 80">
         <polygon points="40,5 72,22 72,58 40,75 8,58 8,22" fill="#0078d4"/>
-        <rect x="22" y="28" width="36" height="26" rx="2" fill="#fff"/>
-        <rect x="26" y="32" width="28" height="3" fill="#0078d4" opacity="0.7"/>
-        <rect x="26" y="38" width="20" height="3" fill="#0078d4" opacity="0.5"/>
-        <rect x="26" y="44" width="24" height="3" fill="#0078d4" opacity="0.3"/>
-        <circle cx="55" cy="55" r="10" fill="#ffb900"/>
-        <path d="M51 55 L54 58 L60 51" stroke="#fff" stroke-width="2" fill="none"/>
+        <polygon points="40,18 58,28 58,48 40,58 22,48 22,28" fill="#50b0f0"/>
+        <polygon points="40,28 48,33 48,43 40,48 32,43 32,33" fill="#fff"/>
       </svg>
     </div>
-    <span class="lb">PDF Grounding</span>
-    <span class="sl">Polygon highlights</span>
+    <span class="lb">Azure Active<br>Directory</span>
+    <span class="sl">Entra ID · RBAC</span>
   </div>
 
-  <!-- OpenTelemetry -->
-  <div class="nd" style="left:880px;top:1090px;">
+  <!-- Azure Monitor / App Insights -->
+  <div class="nd" style="left:760px;top:830px;">
     <div class="ic">
       <svg viewBox="0 0 80 80">
-        <circle cx="40" cy="40" r="30" fill="#fff" stroke="#8661c5" stroke-width="3"/>
-        <path d="M18 52 L28 36 L40 48 L52 24 L62 42" stroke="#8661c5" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-        <circle cx="52" cy="24" r="4" fill="#8661c5"/>
+        <circle cx="40" cy="40" r="30" fill="#fff" stroke="#0078d4" stroke-width="3"/>
+        <path d="M18 52 L28 36 L38 48 L50 22 L62 42" stroke="#0078d4" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="50" cy="22" r="4" fill="#0078d4"/>
       </svg>
     </div>
-    <span class="lb">OpenTelemetry</span>
-    <span class="sl">Traces · Metrics</span>
+    <span class="lb">Azure Monitor</span>
+    <span class="sl">Application Insights<br>OpenTelemetry</span>
   </div>
 
-  <!-- Config -->
-  <div class="nd" style="left:1080px;top:1090px;">
+  <!-- Azure Key Vault -->
+  <div class="nd" style="left:970px;top:830px;">
     <div class="ic">
       <svg viewBox="0 0 80 80">
-        <circle cx="40" cy="28" r="18" fill="#ffb900"/>
-        <rect x="36" y="42" width="8" height="28" rx="2" fill="#ffb900"/>
-        <rect x="32" y="52" width="16" height="6" rx="2" fill="#c89200"/>
+        <circle cx="40" cy="28" r="20" fill="#ffb900"/>
+        <rect x="36" y="44" width="8" height="28" rx="2" fill="#ffb900"/>
+        <rect x="32" y="54" width="16" height="6" rx="2" fill="#c89200"/>
         <circle cx="40" cy="28" r="10" fill="#fff"/>
         <circle cx="40" cy="28" r="5" fill="#ffb900"/>
       </svg>
     </div>
-    <span class="lb">Config &<br>Feature Flags</span>
-    <span class="sl">core/config.py</span>
-  </div>
-
-  <!-- Kafka -->
-  <div class="nd" style="left:1280px;top:1090px;">
-    <div class="ic">
-      <svg viewBox="0 0 80 80">
-        <circle cx="40" cy="40" r="28" fill="#003f72"/>
-        <circle cx="40" cy="30" r="7" fill="#fff"/>
-        <circle cx="28" cy="48" r="5.5" fill="#fff" opacity="0.8"/>
-        <circle cx="52" cy="48" r="5.5" fill="#fff" opacity="0.8"/>
-        <line x1="40" y1="37" x2="28" y2="43" stroke="#fff" stroke-width="2"/>
-        <line x1="40" y1="37" x2="52" y2="43" stroke="#fff" stroke-width="2"/>
-        <circle cx="40" cy="60" r="4" fill="#fff" opacity="0.5"/>
-        <line x1="28" y1="53" x2="40" y2="56" stroke="#fff" stroke-width="1.5" opacity="0.5"/>
-        <line x1="52" y1="53" x2="40" y2="56" stroke="#fff" stroke-width="1.5" opacity="0.5"/>
-      </svg>
-    </div>
-    <span class="lb">Kafka Bus</span>
-    <span class="sl">Event streaming</span>
-  </div>
-
-  <!-- Docker -->
-  <div class="nd" style="left:1480px;top:1090px;">
-    <div class="ic">
-      <svg viewBox="0 0 80 80">
-        <rect x="5" y="10" width="70" height="55" rx="6" fill="#2496ed"/>
-        <rect x="12" y="17" width="12" height="10" rx="1" fill="#fff" opacity="0.9"/>
-        <rect x="28" y="17" width="12" height="10" rx="1" fill="#fff" opacity="0.8"/>
-        <rect x="44" y="17" width="12" height="10" rx="1" fill="#fff" opacity="0.7"/>
-        <rect x="12" y="31" width="12" height="10" rx="1" fill="#fff" opacity="0.7"/>
-        <rect x="28" y="31" width="12" height="10" rx="1" fill="#fff" opacity="0.6"/>
-        <rect x="44" y="31" width="12" height="10" rx="1" fill="#fff" opacity="0.5"/>
-        <path d="M10 52 C22 44 38 50 50 44 C60 40 68 44 72 48" stroke="#fff" stroke-width="2.5" fill="none"/>
-      </svg>
-    </div>
-    <span class="lb">Docker Compose</span>
-    <span class="sl">Containerized deploy</span>
+    <span class="lb">Azure Key Vault</span>
+    <span class="sl">API keys · DB secrets</span>
   </div>
 
   <!-- ═══════════════ ARROW LABELS ═══════════════ -->
-  <div class="albl" style="left:215px;top:336px;">Query</div>
-  <div class="albl" style="left:445px;top:336px;">API request</div>
-  <div class="albl" style="left:715px;top:336px;">Plan</div>
-  <div class="albl" style="left:885px;top:440px;">Retrieve</div>
-  <div class="albl" style="left:975px;top:522px;">Evidence</div>
-  <div class="albl" style="left:1205px;top:522px;">Verify</div>
-  <div class="albl" style="left:965px;top:336px;">Extract</div>
-  <div class="albl" style="left:1145px;top:440px;">Normalize</div>
-  <div class="albl" style="left:1000px;top:156px;color:#0078d4;">LLM calls</div>
-  <div class="albl" style="left:625px;top:156px;color:#8661c5;">Typed messages</div>
-  <div class="albl" style="left:1530px;top:448px;transform:rotate(-90deg);font-size:12px;">Embeddings & chunks</div>
-  <div class="albl" style="left:220px;top:810px;">Upload</div>
-  <div class="albl" style="left:515px;top:752px;color:#d83b01;">Parse</div>
-  <div class="albl" style="left:515px;top:900px;color:#d83b01;">DI (optional)</div>
-  <div class="albl" style="left:740px;top:752px;">Chunk</div>
-  <div class="albl" style="left:960px;top:752px;">Embed</div>
-  <div class="albl" style="left:250px;top:1110px;">Feedback</div>
-
-  <!-- Virtual network label -->
-  <div style="position:absolute;right:130px;bottom:340px;font-size:12px;color:#0078d4;font-style:italic;z-index:15;letter-spacing:0.3px;">
-    Agent Framework boundary
-  </div>
+  <div class="albl" style="left:195px;top:233px;">HTTPS</div>
+  <div class="albl" style="left:450px;top:233px;">TLS</div>
+  <div class="albl" style="left:670px;top:233px;">gRPC</div>
+  <div class="albl" style="left:1020px;top:180px;">Chunks &<br>embeddings</div>
+  <div class="albl" style="left:1020px;top:290px;">LLM API</div>
+  <div class="albl" style="left:1000px;top:370px;">PDF upload</div>
+  <div class="albl" style="left:1050px;top:450px;">OCR</div>
+  <div class="albl" style="left:250px;top:620px;color:#d83b01;">Docker push</div>
+  <div class="albl" style="left:470px;top:570px;color:#d83b01;">Docker pull</div>
+  <div class="albl" style="left:680px;top:490px;">Session cache</div>
+  <div class="albl" style="left:640px;top:560px;">Events</div>
+  <div class="albl" style="left:505px;top:780px;transform:rotate(-90deg);font-size:9px;">Role-based<br>access control</div>
+  <div class="albl" style="left:750px;top:780px;transform:rotate(-70deg);font-size:9px;">Telemetry</div>
+  <div class="albl" style="left:950px;top:760px;transform:rotate(-60deg);font-size:9px;">Secrets</div>
 
 </div>
 </body>
