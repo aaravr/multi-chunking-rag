@@ -12,6 +12,9 @@ from azure.core.exceptions import HttpResponseError
 
 from core.config import settings
 from core.contracts import CanonicalPage, CanonicalSpan, ChunkRecord, DocumentRecord, PageRecord, TriageDecision
+from core.enums import (
+    ChunkType, SourceType, TriageDecisionType, ProcessingLevel, ProgressPhase,
+)
 from agents.classifier_agent import ClassifierAgent, get_classification_memory
 from agents.contracts import ChunkingOutcome, PreprocessorInput
 from agents.message_bus import MessageBus
@@ -71,76 +74,26 @@ def ingest_pdf(
 
             for page_index in range(page_count):
                 if progress_cb:
-                    progress_cb(
-                        "triage",
-                        page_index + 1,
-                        page_count,
-                    )
+                    progress_cb(ProgressPhase.TRIAGE, page_index + 1, page_count)
                 page = pdf.load_page(page_index)
                 triage = analyze_page(page)
                 triage = _apply_force_di(triage, page_index + 1, force_set)
                 di_json_path = None
-                if triage.decision == "di_required":
-                    if progress_cb:
-                        progress_cb(
-                            "di",
-                            page_index + 1,
-                            page_count,
-                        )
-                    if settings.disable_di:
-                        triage = _apply_disable_di(triage)
-                        if progress_cb:
-                            progress_cb(
-                                "di_skipped",
-                                page_index + 1,
-                                page_count,
-                            )
-                    else:
-                        di_json_path = os.path.join(
-                            output_dir, f"page_{page_index + 1:04d}_di.json"
-                        )
-                        if not os.path.exists(di_json_path):
-                            if di_client is None:
-                                di_client = DIClient()
-                            page_bytes = _extract_single_page_pdf(pdf, page_index)
-                            try:
-                                di_result = di_client.analyze_page_bytes(page_bytes)
-                            except HttpResponseError as exc:
-                                if _is_invalid_content_length(exc):
-                                    di_result = _analyze_with_image_fallback(
-                                        di_client=di_client, page=page
-                                    )
-                                else:
-                                    raise
-                            _write_json(di_json_path, di_result.result)
+                if triage.decision == TriageDecisionType.DI_REQUIRED:
+                    triage, di_json_path, di_client = _handle_di_page(
+                        pdf, page, page_index, output_dir, triage, di_client, progress_cb, page_count,
+                    )
 
                 page_record = _build_page_record(
-                    doc_id=doc_id,
-                    page_number=page_index + 1,
-                    triage=triage,
-                    di_json_path=di_json_path,
+                    doc_id=doc_id, page_number=page_index + 1,
+                    triage=triage, di_json_path=di_json_path,
                 )
                 page_buffer.append(page_record)
                 if len(page_buffer) >= 50:
-                    repo.insert_pages(conn, page_buffer)
-                    conn.commit()
-                    page_buffer.clear()
-                    if progress_cb:
-                        progress_cb(
-                            "pages_committed",
-                            page_index + 1,
-                            page_count,
-                        )
+                    _flush_page_buffer(conn, page_buffer, progress_cb, page_index + 1, page_count)
 
             if page_buffer:
-                repo.insert_pages(conn, page_buffer)
-                conn.commit()
-                if progress_cb:
-                    progress_cb(
-                        "pages_committed",
-                        page_count,
-                        page_count,
-                    )
+                _flush_page_buffer(conn, page_buffer, progress_cb, page_count, page_count)
     finally:
         pdf.close()
 
@@ -189,7 +142,7 @@ def ingest_and_chunk(
 
     # ── Preprocessor: determine processing strategy (§4.9) ───────────
     preprocess_result = None
-    processing_level = "late_chunking"  # default
+    processing_level = ProcessingLevel.LATE_CHUNKING
     if settings.enable_preprocessor:
         preprocess_result = _run_preprocessor(
             doc_id=doc_id,
@@ -203,11 +156,11 @@ def ingest_and_chunk(
             processing_level = strategy.processing_level
 
             # ── Skip: nothing to do ──────────────────────────────
-            if processing_level == "skip":
+            if processing_level == ProcessingLevel.SKIP:
                 return doc_id
 
             # ── Metadata-only: extract text and facts, no chunking ──
-            if processing_level == "metadata_only":
+            if processing_level == ProcessingLevel.METADATA_ONLY:
                 _process_metadata_only(
                     doc_id=doc_id,
                     pdf_path=pdf_path,
@@ -218,7 +171,7 @@ def ingest_and_chunk(
                 return doc_id
 
             # For chunking levels, apply strategy parameters
-            if processing_level == "late_chunking":
+            if processing_level == ProcessingLevel.LATE_CHUNKING:
                 macro_max_tokens = strategy.macro_max_tokens
                 macro_overlap_tokens = strategy.macro_overlap_tokens
                 child_target_tokens = strategy.child_target_tokens
@@ -243,7 +196,7 @@ def ingest_and_chunk(
         )
 
     if progress_cb:
-        progress_cb("embed", 0, len(canonical_pages))
+        progress_cb(ProgressPhase.EMBED, 0, len(canonical_pages))
     chunk_start_time = time.monotonic()
 
     # ── Delegate chunking to PreprocessorAgent ──────────────────────
@@ -355,12 +308,55 @@ def _append_triage_reason(
     )
 
 
+def _handle_di_page(
+    pdf, page, page_index: int, output_dir: str,
+    triage: TriageDecision, di_client: Optional[DIClient],
+    progress_cb, page_count: int,
+) -> tuple:
+    """Process a single page that requires Document Intelligence.
+
+    Returns (updated_triage, di_json_path, di_client).
+    """
+    if progress_cb:
+        progress_cb(ProgressPhase.DI, page_index + 1, page_count)
+
+    if settings.disable_di:
+        triage = _apply_disable_di(triage)
+        if progress_cb:
+            progress_cb(ProgressPhase.DI_SKIPPED, page_index + 1, page_count)
+        return triage, None, di_client
+
+    di_json_path = os.path.join(output_dir, f"page_{page_index + 1:04d}_di.json")
+    if not os.path.exists(di_json_path):
+        if di_client is None:
+            di_client = DIClient()
+        page_bytes = _extract_single_page_pdf(pdf, page_index)
+        try:
+            di_result = di_client.analyze_page_bytes(page_bytes)
+        except HttpResponseError as exc:
+            if _is_invalid_content_length(exc):
+                di_result = _analyze_with_image_fallback(di_client=di_client, page=page)
+            else:
+                raise
+        _write_json(di_json_path, di_result.result)
+    return triage, di_json_path, di_client
+
+
+def _flush_page_buffer(conn, page_buffer: list, progress_cb, current: int, total: int) -> None:
+    """Persist page buffer to DB and report progress."""
+    repo.insert_pages(conn, page_buffer)
+    conn.commit()
+    page_buffer.clear()
+    if progress_cb:
+        progress_cb(ProgressPhase.PAGES_COMMITTED, current, total)
+
+
 def _apply_force_di(
     triage: TriageDecision, page_number: int, force_set: Set[int]
 ) -> TriageDecision:
     if page_number not in force_set:
         return triage
-    return _append_triage_reason(triage, "force_di", decision="di_required")
+    return _append_triage_reason(triage, "force_di", decision=TriageDecisionType.DI_REQUIRED)
 
 
 def _apply_disable_di(triage: TriageDecision) -> TriageDecision:
@@ -440,7 +436,7 @@ def _run_classifier(
 ):
     """Run the ClassifierAgent on pre-extracted front-matter text."""
     if progress_cb:
-        progress_cb("classify", 0, 1)
+        progress_cb(ProgressPhase.CLASSIFY, 0, 1)
 
     bus = MessageBus()
     gateway = None
@@ -458,7 +454,7 @@ def _run_classifier(
     )
 
     if progress_cb:
-        progress_cb("classify_done", 1, 1)
+        progress_cb(ProgressPhase.CLASSIFY_DONE, 1, 1)
 
     return result
 
@@ -472,7 +468,7 @@ def _run_preprocessor(
 ):
     """Run the preprocessor agent to determine chunking strategy (§4.9)."""
     if progress_cb:
-        progress_cb("preprocess", 0, 1)
+        progress_cb(ProgressPhase.PREPROCESS, 0, 1)
 
     # Build triage summary from page records
     triage_summary = _build_triage_summary(pages)
@@ -493,7 +489,7 @@ def _run_preprocessor(
     result = preprocessor.determine_strategy(inp)
 
     if progress_cb:
-        progress_cb("preprocess_done", 1, 1)
+        progress_cb(ProgressPhase.PREPROCESS_DONE, 1, 1)
 
     return result
 
@@ -511,7 +507,7 @@ def _build_triage_summary(pages: list) -> dict:
         metrics = p.triage_metrics
         total_text += metrics.text_length
         total_image_coverage += metrics.image_coverage_ratio
-        if p.triage_decision == "di_required":
+        if p.triage_decision == TriageDecisionType.DI_REQUIRED:
             di_pages += 1
 
     page_count = len(pages)
@@ -549,7 +545,7 @@ def _process_metadata_only(
     structured metadata fields.
     """
     if progress_cb:
-        progress_cb("metadata_only", 0, 1)
+        progress_cb(ProgressPhase.METADATA_ONLY, 0, 1)
 
     # Extract all text from the PDF for fact extraction
     import fitz as fitz_mod
@@ -579,12 +575,12 @@ def _process_metadata_only(
                 page_numbers=list(range(1, len(pages) + 1)),
                 macro_id=0,
                 child_id=0,
-                chunk_type="narrative",
+                chunk_type=ChunkType.NARRATIVE,
                 text_content=all_text[:10000],
                 char_start=0,
                 char_end=len(all_text[:10000]),
                 polygons=[],
-                source_type="native",
+                source_type=SourceType.NATIVE,
                 embedding_model=settings.embedding_model,
                 embedding_dim=settings.embedding_dim,
                 embedding=[],
@@ -598,7 +594,7 @@ def _process_metadata_only(
         conn.commit()
 
     if progress_cb:
-        progress_cb("metadata_only_done", 1, 1)
+        progress_cb(ProgressPhase.METADATA_ONLY_DONE, 1, 1)
 
     logger.info(
         "Processed doc %s as metadata_only (%d pages, %d chars text)",
@@ -614,13 +610,13 @@ def _collect_span_lineage(
     Returns (polygons, source_type, heading_path, section_id).
     """
     polygons: list = []
-    source_type = "native"
+    source_type = SourceType.NATIVE
     heading_path = ""
     section_id = ""
     for span in spans:
         polygons.extend(span.polygons)
-        if span.source_type == "di":
-            source_type = "di"
+        if span.source_type == SourceType.DI:
+            source_type = SourceType.DI
         if span.heading_path and not heading_path:
             heading_path = span.heading_path
         if span.section_id and not section_id:
@@ -658,7 +654,7 @@ def _build_single_chunk(
         page_numbers=all_pages,
         macro_id=0,
         child_id=0,
-        chunk_type="narrative",
+        chunk_type=ChunkType.NARRATIVE,
         text_content=all_text,
         char_start=0,
         char_end=len(all_text),
@@ -705,7 +701,7 @@ def _build_page_level_chunks(
             page_numbers=[page.page_number],
             macro_id=page_idx,
             child_id=0,
-            chunk_type="narrative",
+            chunk_type=ChunkType.NARRATIVE,
             text_content=page.text,
             char_start=0,
             char_end=len(page.text),
@@ -737,9 +733,9 @@ def _record_chunking_outcome(
         return
 
     total = len(chunks)
-    table_count = sum(1 for c in chunks if c.chunk_type == "table")
-    heading_count = sum(1 for c in chunks if c.chunk_type == "heading")
-    boilerplate_count = sum(1 for c in chunks if c.chunk_type == "boilerplate")
+    table_count = sum(1 for c in chunks if c.chunk_type == ChunkType.TABLE)
+    heading_count = sum(1 for c in chunks if c.chunk_type == ChunkType.HEADING)
+    boilerplate_count = sum(1 for c in chunks if c.chunk_type == ChunkType.BOILERPLATE)
     avg_tokens = sum(len(c.text_content.split()) for c in chunks) / total
 
     # Compute a simple quality heuristic:

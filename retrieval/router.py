@@ -6,6 +6,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from core.contracts import RetrievedChunk
 from core.config import settings
+from core.enums import IntentType, CoverageType, ChunkType, SourceType
 from retrieval import vector_search
 from retrieval.hybrid import (
     bm25_heading_anchor,
@@ -167,21 +168,21 @@ class RetrievalPlan:
 def classify_query(query: str) -> QueryIntent:
     pages = _extract_pages(query)
     if pages:
-        return QueryIntent(intent="location", pages=pages)
+        return QueryIntent(intent=IntentType.LOCATION, pages=pages)
     if any(pattern.search(query) for pattern in POINTER_TERMS):
         return QueryIntent(
-            intent="coverage", pages=[], coverage_type="pointer"
+            intent=IntentType.COVERAGE, pages=[], coverage_type=CoverageType.POINTER
         )
     if any(pattern.search(query) for pattern in CLOSED_PATTERNS):
         return QueryIntent(
-            intent="coverage", pages=[], coverage_type="list", status_filter="closed"
+            intent=IntentType.COVERAGE, pages=[], coverage_type=CoverageType.LIST, status_filter="closed"
         )
     if any(pattern.search(query) for pattern in COVERAGE_PATTERNS) or any(
         pattern.search(query) for pattern in ATTRIBUTE_TERMS
     ):
         coverage_type = _classify_coverage_type(query)
-        return QueryIntent(intent="coverage", pages=[], coverage_type=coverage_type)
-    return QueryIntent(intent="semantic", pages=[])
+        return QueryIntent(intent=IntentType.COVERAGE, pages=[], coverage_type=coverage_type)
+    return QueryIntent(intent=IntentType.SEMANTIC, pages=[])
 
 
 def search_with_intent(
@@ -238,55 +239,57 @@ def _build_plan(
     debug: Dict[str, object],
     top_k: int,
 ) -> RetrievalPlan:
-    if intent.intent == "location":
-        def _locate() -> List[RetrievedChunk]:
-            return vector_search.search_on_pages(
-                doc_id, query, intent.pages, top_k=100
-            )
+    builder = _PLAN_BUILDERS.get(intent.intent, _build_semantic_plan)
+    return builder(doc_id, query, intent, debug, top_k)
 
-        def _expand(chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:
-            return chunks
 
-        def _select(chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:
-            if settings.enable_reranker:
-                from retrieval.rerank import rerank
+def _build_location_plan(
+    doc_id: str, query: str, intent: QueryIntent, debug: Dict[str, object], top_k: int,
+) -> RetrievalPlan:
+    def locate() -> List[RetrievedChunk]:
+        return vector_search.search_on_pages(doc_id, query, intent.pages, top_k=100)
 
-                return rerank(query, chunks)
-            return chunks
+    def expand(chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:
+        return chunks
 
-        return RetrievalPlan("location", _locate, _expand, _select)
+    def select(chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:
+        return _rerank_if_enabled(query, chunks)
 
-    if intent.intent == "coverage":
-        def _locate() -> List[RetrievedChunk]:
-            return _locate_coverage_anchor(doc_id, query, intent, debug)
+    return RetrievalPlan(IntentType.LOCATION, locate, expand, select)
 
-        def _expand(anchors: List[RetrievedChunk]) -> List[RetrievedChunk]:
-            if not anchors:
-                if intent.coverage_type == "list":
-                    raise RuntimeError("CoverageListQuery has no anchor heading.")
-                return []
-            debug["anchor"] = _format_anchor(anchors[0])
-            candidates, expansion = _expand_from_anchor(
-                doc_id,
-                anchors[0],
-                allow_page_window=_allow_page_window(intent.coverage_type),
-            )
-            debug["expansion"] = expansion
-            if intent.coverage_type in {"list", "numeric_list"} and not candidates:
-                raise RuntimeError("CoverageListQuery expansion returned no chunks.")
-            return candidates
 
-        def _select(chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:
-            filtered = _apply_table_filter(query, chunks)
-            if settings.enable_reranker:
-                from retrieval.rerank import rerank
+def _build_coverage_plan(
+    doc_id: str, query: str, intent: QueryIntent, debug: Dict[str, object], top_k: int,
+) -> RetrievalPlan:
+    def locate() -> List[RetrievedChunk]:
+        return _locate_coverage_anchor(doc_id, query, intent, debug)
 
-                return rerank(query, filtered)
-            return filtered
+    def expand(anchors: List[RetrievedChunk]) -> List[RetrievedChunk]:
+        if not anchors:
+            if intent.coverage_type == CoverageType.LIST:
+                raise RuntimeError("CoverageListQuery has no anchor heading.")
+            return []
+        debug["anchor"] = _format_anchor(anchors[0])
+        candidates, expansion = _expand_from_anchor(
+            doc_id, anchors[0],
+            allow_page_window=_allow_page_window(intent.coverage_type),
+        )
+        debug["expansion"] = expansion
+        if intent.coverage_type in {CoverageType.LIST, CoverageType.NUMERIC_LIST} and not candidates:
+            raise RuntimeError("CoverageListQuery expansion returned no chunks.")
+        return candidates
 
-        return RetrievalPlan("coverage", _locate, _expand, _select)
+    def select(chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:
+        filtered = _apply_table_filter(query, chunks)
+        return _rerank_if_enabled(query, filtered)
 
-    def _locate() -> List[RetrievedChunk]:
+    return RetrievalPlan(IntentType.COVERAGE, locate, expand, select)
+
+
+def _build_semantic_plan(
+    doc_id: str, query: str, intent: QueryIntent, debug: Dict[str, object], top_k: int,
+) -> RetrievalPlan:
+    def locate() -> List[RetrievedChunk]:
         target = _match_section_target(query)
         if target:
             anchors = _locate_section_anchor(doc_id, query, target, debug)
@@ -299,18 +302,31 @@ def _build_plan(
             return hybrid_search(doc_id, query, top_k=100)
         return vector_search.search(doc_id, query, top_k=100)
 
-    def _expand(chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:
+    def expand(chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:
         return chunks
 
-    def _select(chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:
+    def select(chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:
         filtered = _apply_table_filter(query, chunks)
-        if settings.enable_reranker:
-            from retrieval.rerank import rerank
-
-            filtered = rerank(query, filtered)
+        filtered = _rerank_if_enabled(query, filtered)
         return filtered[:top_k]
 
-    return RetrievalPlan("semantic", _locate, _expand, _select)
+    return RetrievalPlan(IntentType.SEMANTIC, locate, expand, select)
+
+
+def _rerank_if_enabled(query: str, chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:
+    """Apply cross-encoder reranking when the feature flag is on."""
+    if settings.enable_reranker:
+        from retrieval.rerank import rerank
+        return rerank(query, chunks)
+    return chunks
+
+
+# Intent → plan builder dispatch table (Open/Closed Principle)
+_PLAN_BUILDERS: Dict[str, Callable] = {
+    IntentType.LOCATION: _build_location_plan,
+    IntentType.COVERAGE: _build_coverage_plan,
+    IntentType.SEMANTIC: _build_semantic_plan,
+}
 
 
 def _expand_coverage_query(query: str) -> str:
@@ -324,23 +340,23 @@ def _expand_coverage_query(query: str) -> str:
 
 
 def _allow_page_window(coverage_type: Optional[str]) -> bool:
-    return coverage_type == "attribute"
+    return coverage_type == CoverageType.ATTRIBUTE
 
 
 def _classify_coverage_type(query: str) -> str:
     if any(pattern.search(query) for pattern in POINTER_TERMS):
-        return "pointer"
+        return CoverageType.POINTER
     if re.search(r"\bitems of note\b", query, re.IGNORECASE) and re.search(
         r"\bnet income\b|\baggregate impact\b|\baggregate\b", query, re.IGNORECASE
     ):
-        return "numeric_list"
+        return CoverageType.NUMERIC_LIST
     has_list = any(pattern.search(query) for pattern in LIST_TERMS)
     has_attribute = any(pattern.search(query) for pattern in ATTRIBUTE_TERMS)
     if has_list:
-        return "list"
+        return CoverageType.LIST
     if has_attribute:
-        return "attribute"
-    return "list"
+        return CoverageType.ATTRIBUTE
+    return CoverageType.LIST
 
 
 def _expand_from_anchor(
@@ -432,7 +448,7 @@ def _apply_table_filter(query: str, chunks: List[RetrievedChunk]) -> List[Retrie
         return [
             chunk
             for chunk in chunks
-            if chunk.chunk_type != "table"
+            if chunk.chunk_type != ChunkType.TABLE
             and not chunk.text_content.lstrip().startswith("[TABLE]")
         ]
     return chunks
@@ -528,7 +544,7 @@ def _collect_anchor_rejection_reasons(
 
     # Items of note (MD&A) ≠ Note 12 (financial statements)
     is_table_text = candidate.text_content.lstrip().startswith("[TABLE]")
-    if candidate.chunk_type not in {"narrative", "heading"} or is_table_text:
+    if candidate.chunk_type not in {ChunkType.NARRATIVE, ChunkType.HEADING} or is_table_text:
         reasons.append("reject_chunk_type")
 
     if not _contains_any_phrase(combined_text_lower, ITEMS_OF_NOTE_PHRASES):
@@ -561,7 +577,7 @@ def _select_items_of_note_anchor(
     doc_id: str, query: str, decisions: List[Dict[str, object]]
 ) -> List[RetrievedChunk]:
     method = _anchor_method_label()
-    is_numeric_list = _classify_coverage_type(query) == "numeric_list"
+    is_numeric_list = _classify_coverage_type(query) == CoverageType.NUMERIC_LIST
     if settings.enable_hybrid_retrieval:
         candidates = bm25_heading_anchor_candidates(
             doc_id, ITEMS_OF_NOTE_PHRASES, top_k=25

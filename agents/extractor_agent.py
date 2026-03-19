@@ -26,6 +26,7 @@ from agents.contracts import (
 )
 from agents.message_bus import MessageBus
 from agents.model_gateway import ModelCallContext, ModelGateway
+from core.enums import ExtractionMethod, SynthesisMode
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +169,7 @@ class ExtractorAgent(BaseAgent):
             query_id=query_id,
             fields=validated,
             overall_confidence=round(overall, 4),
-            extraction_model=self._model_id if llm_needed else "deterministic",
+            extraction_model=self._model_id if llm_needed else SynthesisMode.DETERMINISTIC,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
         )
@@ -205,7 +206,7 @@ class ExtractorAgent(BaseAgent):
                 confidence=0.9,
                 source_chunk_ids=source_chunks,
                 page_numbers=sorted(set(page_numbers)),
-                extraction_method="regex",
+                extraction_method=ExtractionMethod.REGEX,
             )
         return None
 
@@ -229,80 +230,48 @@ class ExtractorAgent(BaseAgent):
                 "role": "user",
                 "content": _EXTRACTION_USER.format(
                     field_definitions=field_descriptions,
-                    evidence=evidence_text[:12000],  # Truncate to fit context
+                    evidence=evidence_text[:12000],
                 ),
             },
         ]
-
-        ctx = ModelCallContext(
-            query_id=query_id,
-            agent_id=self.agent_name,
-            step_id=new_id(),
-        )
 
         result = self.gateway.call_model(
             model_id=self._model_id,
             messages=messages,
             temperature=0.0,
-            ctx=ctx,
+            ctx=ModelCallContext(query_id=query_id, agent_id=self.agent_name, step_id=new_id()),
         )
 
-        content = result.get("content", "{}")
-        input_tokens = result.get("input_tokens", 0)
-        output_tokens = result.get("output_tokens", 0)
+        parsed = _parse_llm_json(result.get("content", "{}"))
+        extracted_fields = [
+            self._build_llm_field(fdef, parsed.get(fdef.field_name), chunks)
+            for fdef in fields
+        ]
+        return extracted_fields, result.get("input_tokens", 0), result.get("output_tokens", 0)
 
-        # Parse JSON response
-        extracted_fields = []
-        try:
-            # Handle markdown code blocks
-            clean = content.strip()
-            if clean.startswith("```"):
-                clean = clean.split("\n", 1)[1] if "\n" in clean else clean[3:]
-                clean = clean.rsplit("```", 1)[0]
-            parsed = json.loads(clean)
-        except (json.JSONDecodeError, IndexError):
-            parsed = {}
-
-        field_map = {f.field_name: f for f in fields}
-        for fname, fdef in field_map.items():
-            raw_value = parsed.get(fname)
-            if raw_value is None:
-                extracted_fields.append(
-                    ExtractedField(
-                        field_name=fname,
-                        raw_value="",
-                        confidence=0.0,
-                        extraction_method="llm",
-                        validation_passed=not fdef.required,
-                        validation_errors=["Field not found"] if fdef.required else [],
-                    )
-                )
-            else:
-                # Find source chunks
-                source_chunks = []
-                page_numbers = []
-                str_val = str(raw_value)
-                for chunk in chunks:
-                    chunk_text = getattr(chunk, "text_content", str(chunk))
-                    if str_val.lower() in chunk_text.lower():
-                        cid = getattr(chunk, "chunk_id", "")
-                        if cid:
-                            source_chunks.append(cid)
-                        pages = getattr(chunk, "page_numbers", [])
-                        page_numbers.extend(pages)
-
-                extracted_fields.append(
-                    ExtractedField(
-                        field_name=fname,
-                        raw_value=str_val,
-                        confidence=0.7 if source_chunks else 0.4,
-                        source_chunk_ids=source_chunks,
-                        page_numbers=sorted(set(page_numbers)),
-                        extraction_method="llm",
-                    )
-                )
-
-        return extracted_fields, input_tokens, output_tokens
+    def _build_llm_field(
+        self, fdef: FieldDefinition, raw_value: Optional[Any], chunks: List[Any],
+    ) -> ExtractedField:
+        """Build an ExtractedField from a single LLM-parsed value."""
+        if raw_value is None:
+            return ExtractedField(
+                field_name=fdef.field_name,
+                raw_value="",
+                confidence=0.0,
+                extraction_method=ExtractionMethod.LLM,
+                validation_passed=not fdef.required,
+                validation_errors=["Field not found"] if fdef.required else [],
+            )
+        str_val = str(raw_value)
+        source_chunks, page_numbers = _find_source_chunks(str_val, chunks)
+        return ExtractedField(
+            field_name=fdef.field_name,
+            raw_value=str_val,
+            confidence=0.7 if source_chunks else 0.4,
+            source_chunk_ids=source_chunks,
+            page_numbers=sorted(set(page_numbers)),
+            extraction_method=ExtractionMethod.LLM,
+        )
 
     def _validate_field(
         self, field: ExtractedField, schema: ExtractionSchema
@@ -351,3 +320,32 @@ class ExtractorAgent(BaseAgent):
             page_str = ",".join(str(p) for p in pages)
             lines.append(f"[{cid}] (pages: {page_str})\n{text}")
         return "\n\n".join(lines)
+
+
+# ── Module-level helpers ──────────────────────────────────────────────
+
+def _parse_llm_json(content: str) -> dict:
+    """Parse JSON from LLM response, stripping markdown code fences."""
+    clean = content.strip()
+    if clean.startswith("```"):
+        clean = clean.split("\n", 1)[1] if "\n" in clean else clean[3:]
+        clean = clean.rsplit("```", 1)[0]
+    try:
+        return json.loads(clean)
+    except (json.JSONDecodeError, IndexError):
+        return {}
+
+
+def _find_source_chunks(value: str, chunks: List[Any]) -> tuple:
+    """Find which chunks contain the given value. Returns (chunk_ids, page_numbers)."""
+    source_chunks: List[str] = []
+    page_numbers: List[int] = []
+    lower_val = value.lower()
+    for chunk in chunks:
+        chunk_text = getattr(chunk, "text_content", str(chunk))
+        if lower_val in chunk_text.lower():
+            cid = getattr(chunk, "chunk_id", "")
+            if cid:
+                source_chunks.append(cid)
+            page_numbers.extend(getattr(chunk, "page_numbers", []))
+    return source_chunks, page_numbers

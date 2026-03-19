@@ -23,6 +23,7 @@ from agents.contracts import (
 )
 from agents.message_bus import MessageBus
 from agents.model_gateway import ModelGateway
+from core.enums import IntentType, CoverageType, RetrievalMethod
 
 logger = logging.getLogger(__name__)
 
@@ -76,19 +77,19 @@ def _extract_comparison_entities(query: str) -> List[str]:
 # Register built-in extended intents
 _register_extended_intent(
     _COMPARISON_PATTERNS,
-    lambda q: QueryIntent(intent="comparison", entities=_extract_comparison_entities(q)),
+    lambda q: QueryIntent(intent=IntentType.COMPARISON, entities=_extract_comparison_entities(q)),
 )
 _register_extended_intent(
     _MULTI_HOP_PATTERNS,
-    lambda q: QueryIntent(intent="multi_hop"),
+    lambda q: QueryIntent(intent=IntentType.MULTI_HOP),
 )
 _register_extended_intent(
     _AGGREGATION_PATTERNS,
-    lambda q: QueryIntent(intent="aggregation", coverage_type="numeric_list"),
+    lambda q: QueryIntent(intent=IntentType.AGGREGATION, coverage_type=CoverageType.NUMERIC_LIST),
 )
 _register_extended_intent(
     _METADATA_PATTERNS,
-    lambda q: QueryIntent(intent="metadata"),
+    lambda q: QueryIntent(intent=IntentType.METADATA),
 )
 
 
@@ -197,7 +198,7 @@ class RouterAgent(BaseAgent):
             )
         except ImportError:
             # PoC dependencies not available — default to semantic
-            return QueryIntent(intent="semantic")
+            return QueryIntent(intent=IntentType.SEMANTIC)
 
     def _classify_extended(
         self, query: str, poc_intent: QueryIntent
@@ -222,57 +223,51 @@ class RouterAgent(BaseAgent):
         doc_ids: List[str],
     ) -> tuple:
         """Build sub-queries and retrieval strategies based on intent."""
+        builder = self._PLAN_BUILDERS.get(intent.intent, RouterAgent._plan_default)
+        return builder(self, query, intent)
+
+    def _plan_comparison(self, query: str, intent: QueryIntent) -> tuple:
         sub_queries: List[SubQuery] = []
         strategies: Dict[str, RetrievalStrategy] = {}
-
-        if intent.intent == "comparison":
-            # Decompose into parallel sub-queries per entity
-            for i, entity in enumerate(intent.entities):
-                sq_id = f"sq_{i}"
-                sub_queries.append(SubQuery(
-                    sub_query_id=sq_id,
-                    query_text=entity,
-                    intent=QueryIntent(intent="semantic"),
-                ))
-                strategies[sq_id] = RetrievalStrategy(method="hybrid", top_k=10)
-
-        elif intent.intent == "multi_hop":
-            # Sequential sub-queries (step 2 depends on step 1)
-            sq1_id = f"sq_0"
-            sq2_id = f"sq_1"
-            sub_queries.append(SubQuery(
-                sub_query_id=sq1_id,
-                query_text=query,
-                intent=QueryIntent(intent="semantic"),
-            ))
-            sub_queries.append(SubQuery(
-                sub_query_id=sq2_id,
-                query_text=query,
-                intent=QueryIntent(intent="semantic"),
-                depends_on=[sq1_id],
-            ))
-            strategies[sq1_id] = RetrievalStrategy(method="hybrid", top_k=10)
-            strategies[sq2_id] = RetrievalStrategy(method="vector", top_k=5)
-
-        elif intent.intent == "aggregation":
-            # Coverage + numeric extraction
-            sq_id = "sq_0"
+        for i, entity in enumerate(intent.entities):
+            sq_id = f"sq_{i}"
             sub_queries.append(SubQuery(
                 sub_query_id=sq_id,
-                query_text=query,
-                intent=intent,
+                query_text=entity,
+                intent=QueryIntent(intent=IntentType.SEMANTIC),
             ))
-            strategies[sq_id] = RetrievalStrategy(method="hybrid", top_k=20)
-
-        else:
-            # Default: single sub-query
-            sq_id = "sq_0"
-            sub_queries.append(SubQuery(
-                sub_query_id=sq_id,
-                query_text=query,
-                intent=intent,
-            ))
-            method = "hybrid" if intent.intent in ("coverage", "semantic") else "vector"
-            strategies[sq_id] = RetrievalStrategy(method=method, top_k=10)
-
+            strategies[sq_id] = RetrievalStrategy(method=RetrievalMethod.HYBRID, top_k=10)
         return sub_queries, strategies
+
+    def _plan_multi_hop(self, query: str, intent: QueryIntent) -> tuple:
+        sq1_id, sq2_id = "sq_0", "sq_1"
+        sub_queries = [
+            SubQuery(sub_query_id=sq1_id, query_text=query, intent=QueryIntent(intent=IntentType.SEMANTIC)),
+            SubQuery(sub_query_id=sq2_id, query_text=query, intent=QueryIntent(intent=IntentType.SEMANTIC), depends_on=[sq1_id]),
+        ]
+        strategies = {
+            sq1_id: RetrievalStrategy(method=RetrievalMethod.HYBRID, top_k=10),
+            sq2_id: RetrievalStrategy(method=RetrievalMethod.VECTOR, top_k=5),
+        }
+        return sub_queries, strategies
+
+    def _plan_aggregation(self, query: str, intent: QueryIntent) -> tuple:
+        sq_id = "sq_0"
+        return (
+            [SubQuery(sub_query_id=sq_id, query_text=query, intent=intent)],
+            {sq_id: RetrievalStrategy(method=RetrievalMethod.HYBRID, top_k=20)},
+        )
+
+    def _plan_default(self, query: str, intent: QueryIntent) -> tuple:
+        sq_id = "sq_0"
+        method = RetrievalMethod.HYBRID if intent.intent in (IntentType.COVERAGE, IntentType.SEMANTIC) else RetrievalMethod.VECTOR
+        return (
+            [SubQuery(sub_query_id=sq_id, query_text=query, intent=intent)],
+            {sq_id: RetrievalStrategy(method=method, top_k=10)},
+        )
+
+    _PLAN_BUILDERS: Dict[str, Callable] = {
+        IntentType.COMPARISON: _plan_comparison,
+        IntentType.MULTI_HOP: _plan_multi_hop,
+        IntentType.AGGREGATION: _plan_aggregation,
+    }

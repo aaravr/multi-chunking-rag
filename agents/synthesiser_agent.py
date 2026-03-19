@@ -25,6 +25,7 @@ from agents.model_gateway import ModelGateway
 from agents.prompt_registry import get_template
 from core.chunk_utils import format_sources
 from core.contracts import RetrievedChunk
+from core.enums import IntentType, CoverageType, SynthesisMode, CoverageMode
 
 logger = logging.getLogger(__name__)
 
@@ -97,8 +98,8 @@ class SynthesiserAgent(BaseAgent):
         template = get_template(intent_type, coverage_type, status_filter)
 
         # For coverage queries, try deterministic extraction first
-        if intent_type == "coverage" and coverage_type != "attribute":
-            if mode in ("deterministic", "llm_fallback"):
+        if intent_type == IntentType.COVERAGE and coverage_type != CoverageType.ATTRIBUTE:
+            if mode in (CoverageMode.DETERMINISTIC, CoverageMode.LLM_FALLBACK):
                 deterministic_result = self._try_deterministic_coverage(
                     query, chunks, query_id, template, mode,
                 )
@@ -147,7 +148,7 @@ class SynthesiserAgent(BaseAgent):
             model_id=result.get("model_id", self.model_id),
             input_tokens=result.get("input_tokens", 0),
             output_tokens=result.get("output_tokens", 0),
-            synthesis_mode="llm",
+            synthesis_mode=SynthesisMode.LLM,
         )
 
         # Record eval metrics
@@ -177,7 +178,7 @@ class SynthesiserAgent(BaseAgent):
         from synthesis.coverage import extract_coverage_items, format_coverage_answer, MIN_ITEMS
 
         items = extract_coverage_items(query, chunks)
-        if mode == "deterministic" or len(items) >= MIN_ITEMS:
+        if mode == CoverageMode.DETERMINISTIC or len(items) >= MIN_ITEMS:
             answer = format_coverage_answer(query, chunks)
             citations = self._extract_citations(answer, chunks)
             deterministic_result = SynthesisResult(
@@ -186,8 +187,8 @@ class SynthesiserAgent(BaseAgent):
                 citations=citations,
                 prompt_template_id=template.template_id,
                 prompt_template_version=template.version,
-                model_id="deterministic",
-                synthesis_mode="deterministic",
+                model_id=SynthesisMode.DETERMINISTIC,
+                synthesis_mode=SynthesisMode.DETERMINISTIC,
             )
 
             # Record eval metrics for deterministic path

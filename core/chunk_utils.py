@@ -6,11 +6,12 @@ Centralises common predicates and transformations so they live in one place.
 from typing import List
 
 from core.contracts import RetrievedChunk
+from core.enums import ChunkType
 
 
 def is_table_chunk(chunk: RetrievedChunk) -> bool:
     """Return True if *chunk* represents a table (by type or [TABLE] prefix)."""
-    return chunk.chunk_type == "table" or chunk.text_content.lstrip().startswith("[TABLE]")
+    return chunk.chunk_type == ChunkType.TABLE or chunk.text_content.lstrip().startswith("[TABLE]")
 
 
 def filter_narrative_chunks(chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:

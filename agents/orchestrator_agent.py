@@ -45,6 +45,7 @@ from agents.contracts import (
 from agents.message_bus import MessageBus, create_message
 from agents.model_gateway import ModelGateway
 from agents.working_memory import WorkingMemoryStore, get_working_memory
+from core.enums import VerificationVerdict
 
 logger = logging.getLogger(__name__)
 
@@ -108,17 +109,29 @@ class OrchestratorAgent(BaseAgent):
         self._decision_chain = []
         query_id = inp.query_id
         start = time.monotonic()
-        working_mem = self._memory
 
-        # Initialise working memory for this query
-        working_mem.set_budget(query_id, inp.token_budget)
-        working_mem.set_state(query_id, {
-            "phase": "routing",
-            "iteration": 0,
-            "confidence": 0.0,
+        self._init_working_memory(query_id, inp.token_budget)
+
+        plan = self._think_route(query_id, inp)
+        all_chunks = self._act_retrieve(query_id, inp, plan)
+
+        if not all_chunks:
+            self._memory.expire(query_id)
+            return self._empty_response(query_id, "No evidence found for query.")
+
+        synthesis = self._think_synthesise(query_id, inp, plan, all_chunks)
+        verification = self._observe_verify(query_id, inp, plan, all_chunks, synthesis)
+        return self._assemble_response(query_id, inp, start, all_chunks, synthesis, verification)
+
+    # ── ReAct phase methods ───────────────────────────────────────────
+
+    def _init_working_memory(self, query_id: str, token_budget: int) -> None:
+        self._memory.set_budget(query_id, token_budget)
+        self._memory.set_state(query_id, {
+            "phase": "routing", "iteration": 0, "confidence": 0.0,
         })
 
-        # ── THINK: Route the query ────────────────────────────────────
+    def _think_route(self, query_id: str, inp: OrchestratorInput) -> QueryPlan:
         self._log_decision("classify", "Classifying query intent")
         plan = self._route_query(query_id, inp.user_query, inp.document_scope.doc_ids)
         self._log_step("route", "completed", f"intent={plan.primary_intent.intent}")
@@ -126,31 +139,24 @@ class OrchestratorAgent(BaseAgent):
             "plan",
             f"Plan: {len(plan.sub_queries)} sub-queries, intent={plan.primary_intent.intent}",
         )
-
-        # Persist plan to working memory
-        working_mem.set_plan(query_id, {
+        self._memory.set_plan(query_id, {
             "primary_intent": plan.primary_intent.intent,
             "sub_query_count": len(plan.sub_queries),
             "original_query": plan.original_query,
             "resolved_query": plan.resolved_query,
         })
-        working_mem.update_state(query_id, {"phase": "retrieval"})
+        self._memory.update_state(query_id, {"phase": "retrieval"})
+        return plan
 
-        # ── ACT + OBSERVE: Execute sub-queries ───────────────────────
+    def _act_retrieve(
+        self, query_id: str, inp: OrchestratorInput, plan: QueryPlan
+    ) -> list:
         all_chunks = []
-        iteration = 0
-
-        for sq in plan.sub_queries:
+        for iteration, sq in enumerate(plan.sub_queries):
             if iteration >= MAX_ITERATIONS:
                 logger.warning("Max iterations (%d) reached", MAX_ITERATIONS)
                 break
 
-            # Check dependencies
-            if sq.depends_on:
-                # For now, sequential execution handles dependencies
-                pass
-
-            # ACT: Retrieve evidence
             self._log_step("retrieve", "running", f"sq={sq.sub_query_id}")
             evidence = self._retrieve(
                 query_id=query_id,
@@ -158,36 +164,27 @@ class OrchestratorAgent(BaseAgent):
                 query=sq.query_text,
                 sub_query_id=sq.sub_query_id,
             )
-            tokens_used = 0  # Retrieval is deterministic, no LLM tokens
-            self._log_step(
-                "retrieve",
-                "completed",
-                f"{len(evidence.chunks)} chunks found",
-                tokens_used=tokens_used,
-            )
+            self._log_step("retrieve", "completed", f"{len(evidence.chunks)} chunks found")
             all_chunks.extend(evidence.chunks)
 
-            # Persist evidence to working memory
-            working_mem.append_evidence(query_id, [
+            self._memory.append_evidence(query_id, [
                 {"chunk_index": i, "sub_query_id": sq.sub_query_id}
                 for i in range(len(evidence.chunks))
             ])
 
-            # OBSERVE: Do we have enough evidence?
             if len(all_chunks) >= 3:
                 self._log_decision("evidence_check", "Sufficient evidence collected")
             else:
                 self._log_decision("evidence_check", f"Only {len(all_chunks)} chunks — continuing")
 
-            iteration += 1
-            working_mem.update_state(query_id, {"iteration": iteration})
+            self._memory.update_state(query_id, {"iteration": iteration + 1})
+        return all_chunks
 
-        # ── THINK: Synthesise ─────────────────────────────────────────
-        if not all_chunks:
-            working_mem.expire(query_id)
-            return self._empty_response(query_id, "No evidence found for query.")
-
-        working_mem.update_state(query_id, {"phase": "synthesis"})
+    def _think_synthesise(
+        self, query_id: str, inp: OrchestratorInput,
+        plan: QueryPlan, all_chunks: list,
+    ) -> SynthesisResult:
+        self._memory.update_state(query_id, {"phase": "synthesis"})
         self._log_step("synthesise", "running")
         synthesis = self._synthesise(
             query_id=query_id,
@@ -196,16 +193,19 @@ class OrchestratorAgent(BaseAgent):
             intent=plan.primary_intent,
         )
         synthesis_tokens = synthesis.input_tokens + synthesis.output_tokens
-        budget_remaining = mem.decrement_budget(query_id, synthesis_tokens)
+        self._memory.decrement_budget(query_id, synthesis_tokens)
         self._log_step(
-            "synthesise",
-            "completed",
+            "synthesise", "completed",
             f"{len(synthesis.citations)} citations, mode={synthesis.synthesis_mode}",
             tokens_used=synthesis_tokens,
         )
+        return synthesis
 
-        # ── OBSERVE: Verify ──────────────────────────────────────────
-        working_mem.update_state(query_id, {"phase": "verification"})
+    def _observe_verify(
+        self, query_id: str, inp: OrchestratorInput,
+        plan: QueryPlan, all_chunks: list, synthesis: SynthesisResult,
+    ) -> VerificationResult:
+        self._memory.update_state(query_id, {"phase": "verification"})
         self._log_step("verify", "running")
         verification = self._verify(
             query_id=query_id,
@@ -214,19 +214,18 @@ class OrchestratorAgent(BaseAgent):
             chunks=all_chunks,
             coverage_type=plan.primary_intent.coverage_type,
         )
-        self._log_step(
-            "verify",
-            "completed",
-            f"verdict={verification.overall_verdict}",
-        )
+        self._log_step("verify", "completed", f"verdict={verification.overall_verdict}")
+        return verification
 
-        # ── ASSEMBLE: Build final response ───────────────────────────
-        working_mem.update_state(query_id, {"phase": "assembly"})
+    def _assemble_response(
+        self, query_id: str, inp: OrchestratorInput, start: float,
+        all_chunks: list, synthesis: SynthesisResult, verification: VerificationResult,
+    ) -> OrchestratorOutput:
+        self._memory.update_state(query_id, {"phase": "assembly"})
         total_ms = (time.monotonic() - start) * 1000
         confidence = verification.overall_confidence
 
-        # Persist execution trace to working memory
-        working_mem.append_trace(query_id, [
+        self._memory.append_trace(query_id, [
             {"action": s.action, "status": s.status, "summary": s.result_summary}
             for s in self._execution_trace
         ])
@@ -250,12 +249,10 @@ class OrchestratorAgent(BaseAgent):
         )
 
         warnings = []
-        if verification.overall_verdict == "FAIL":
+        if verification.overall_verdict == VerificationVerdict.FAIL:
             warnings.append(
                 f"Verification failed: {'; '.join(verification.failed_claims[:3])}"
             )
-        if budget_remaining < 0:
-            warnings.append("Token budget exceeded")
 
         token_usage = TokenUsage(
             prompt_tokens=synthesis.input_tokens,
@@ -265,19 +262,12 @@ class OrchestratorAgent(BaseAgent):
 
         logger.info(
             "Orchestrator: completed in %.0fms, confidence=%.2f, verdict=%s",
-            total_ms,
-            confidence,
-            verification.overall_verdict,
+            total_ms, confidence, verification.overall_verdict,
         )
 
-        # Clean up working memory — query lifecycle complete
-        working_mem.update_state(query_id, {
-            "phase": "completed",
-            "confidence": confidence,
-        })
-        working_mem.expire(query_id)
+        self._memory.update_state(query_id, {"phase": "completed", "confidence": confidence})
+        self._memory.expire(query_id)
 
-        # Record query-level eval
         from agents.agent_eval import QueryEval, get_evaluator
         get_evaluator().record_query(QueryEval(
             query_id=query_id,
