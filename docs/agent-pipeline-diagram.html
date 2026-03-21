@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Multi-Chunking RAG — Document Ingestion & Extraction Pipeline</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: #f4f4f4; }
+  .canvas { width: 1920px; height: 1280px; position: relative; background: #fff; margin: 0 auto; overflow: hidden; }
+
+  /* ── Agent box ── */
+  .agent {
+    position: absolute; z-index: 10;
+    background: linear-gradient(135deg, #f5f0e8 0%, #ede6d6 100%);
+    border: 2px solid #c5b898; border-radius: 10px;
+    padding: 12px 16px; text-align: center;
+    box-shadow: 2px 3px 8px rgba(0,0,0,0.12);
+    min-width: 140px;
+  }
+  .agent .agent-icon { font-size: 22px; margin-bottom: 4px; }
+  .agent .agent-name { font-size: 12px; font-weight: 800; color: #1a1a1a; line-height: 1.3; }
+  .agent .agent-role {
+    display: inline-block; margin-top: 5px; padding: 2px 10px;
+    border-radius: 4px; font-size: 9px; font-weight: 700; letter-spacing: 0.5px;
+  }
+  .role-orchestrator { background: #e8d44d; color: #5a4b00; }
+  .role-helper { background: #d94f4f; color: #fff; }
+  .role-utility { background: #7b8794; color: #fff; }
+  .role-planned { background: #fff; color: #999; border: 1.5px dashed #bbb; }
+
+  /* ── Missing / planned agent (dashed) ── */
+  .agent.missing {
+    background: linear-gradient(135deg, #fafafa 0%, #f0f0f0 100%);
+    border: 2.5px dashed #ccc;
+    opacity: 0.85;
+  }
+  .agent.missing .agent-name { color: #888; }
+
+  /* ── Resource box ── */
+  .resource {
+    position: absolute; z-index: 10;
+    background: linear-gradient(135deg, #e8eef5 0%, #dce4ee 100%);
+    border: 2px solid #a8b8cc; border-radius: 10px;
+    padding: 10px 14px; text-align: center;
+    box-shadow: 1px 2px 6px rgba(0,0,0,0.08);
+  }
+  .resource .res-icon { font-size: 20px; margin-bottom: 3px; }
+  .resource .res-name { font-size: 11px; font-weight: 700; color: #2a3a4a; line-height: 1.25; }
+  .resource .res-sub { font-size: 9px; color: #6a7a8a; margin-top: 2px; line-height: 1.2; }
+
+  .resource.missing {
+    background: linear-gradient(135deg, #fafafa 0%, #f0f0f0 100%);
+    border: 2.5px dashed #bbb;
+    opacity: 0.8;
+  }
+
+  /* ── Sub-resource chips ── */
+  .res-chips { display: flex; gap: 4px; justify-content: center; margin-top: 6px; flex-wrap: wrap; }
+  .res-chip {
+    background: #fff; border: 1px solid #b8c8d8; border-radius: 4px;
+    padding: 2px 8px; font-size: 8.5px; font-weight: 600; color: #4a5a6a;
+  }
+
+  /* ── User / Actor ── */
+  .actor {
+    position: absolute; z-index: 10; text-align: center;
+  }
+  .actor .actor-icon { font-size: 32px; }
+  .actor .actor-name { font-size: 11px; font-weight: 700; color: #1a1a1a; margin-top: 2px; }
+  .actor .actor-sub { font-size: 9px; color: #777; }
+
+  /* ── MCP tool icon (gear) ── */
+  .mcp-icon {
+    position: absolute; z-index: 20;
+    width: 22px; height: 22px;
+    background: #fff; border: 1.5px solid #0078d4;
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-size: 11px; color: #0078d4;
+  }
+
+  /* ── Step number badge ── */
+  .step {
+    position: absolute; z-index: 25;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: #fff; border: 2px solid #444;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 800; color: #333;
+  }
+
+  /* ── Flow label ── */
+  .flow-label {
+    position: absolute; z-index: 15;
+    font-size: 9px; font-weight: 600; color: #555;
+    white-space: nowrap; line-height: 1.2;
+  }
+
+  /* ── Section zones ── */
+  .zone {
+    position: absolute; border-radius: 8px; z-index: 1;
+  }
+  .zone .zone-title {
+    position: absolute; top: 10px; left: 16px;
+    font-size: 14px; font-weight: 800; color: #333; letter-spacing: -0.3px;
+  }
+
+  /* ── Legend ── */
+  .legend {
+    position: absolute; z-index: 30;
+    background: #fff; border: 1.5px solid #ddd; border-radius: 8px;
+    padding: 14px 18px;
+    box-shadow: 1px 2px 6px rgba(0,0,0,0.06);
+  }
+  .legend .legend-title { font-size: 12px; font-weight: 800; color: #333; margin-bottom: 8px; }
+  .legend .legend-item { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+  .legend .legend-line { width: 32px; height: 0; }
+  .legend .legend-text { font-size: 9.5px; color: #444; font-weight: 600; }
+  .legend .legend-icon { width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 10px; }
+
+  /* ── Platform box ── */
+  .platform-box {
+    position: absolute; z-index: 2;
+    border-radius: 8px;
+    padding: 12px;
+  }
+  .platform-box .platform-title {
+    font-size: 13px; font-weight: 800; letter-spacing: -0.3px; margin-bottom: 6px;
+  }
+
+  /* ── SVG overlay ── */
+  svg.ov { position: absolute; top: 0; left: 0; width: 1920px; height: 1280px; z-index: 5; pointer-events: none; }
+
+  /* ── Status badge ── */
+  .status-badge {
+    position: absolute; z-index: 25;
+    padding: 1px 6px; border-radius: 3px;
+    font-size: 7.5px; font-weight: 700; letter-spacing: 0.3px;
+  }
+  .status-impl { background: #d4edda; color: #155724; }
+  .status-partial { background: #fff3cd; color: #856404; }
+  .status-planned { background: #f8d7da; color: #721c24; }
