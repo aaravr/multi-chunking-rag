@@ -1,0 +1,321 @@
+# ============================================================
+# KEDA ScaledObjects — Production-grade autoscaling
+#
+# Scaling strategy:
+#   - Agents scale on Kafka consumer group lag
+#   - Ingestion worker scales on Kafka lag + PostgreSQL queue depth
+#   - Each agent has tuned thresholds based on its workload profile
+#
+# Topic naming convention (from kafka_bus.py):
+#   agent.{name}.requests  — inbound work
+#   agent.{name}.replies   — outbound responses
+#   agent.{name}.requests.dlq — dead letters
+# ============================================================
+
+# ── Router Agent ScaledObject ────────────────────────────────
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: keda-agent-router
+  namespace: idp-platform
+  labels:
+    app.kubernetes.io/name: agent-router
+    app.kubernetes.io/component: keda
+    app.kubernetes.io/part-of: idp-platform
+spec:
+  scaleTargetRef:
+    name: agent-router
+  pollingInterval: 15
+  cooldownPeriod: 60
+  idleReplicaCount: 0
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  fallback:
+    failureThreshold: 3
+    replicas: 2
+  advanced:
+    restoreToOriginalReplicaCount: false
+    horizontalPodAutoscalerConfig:
+      name: keda-hpa-agent-router
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 30
+          policies:
+            - type: Pods
+              value: 2
+              periodSeconds: 60
+            - type: Percent
+              value: 50
+              periodSeconds: 60
+          selectPolicy: Max
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 120
+          selectPolicy: Min
+  triggers:
+    - type: kafka
+      authenticationRef:
+        name: kafka-sasl-auth
+      metadata:
+        bootstrapServers: kafka-headless.idp-platform.svc.cluster.local:9092
+        consumerGroup: idp-agent-router
+        topic: agent.router.requests
+        lagThreshold: "5"
+        activationLagThreshold: "1"
+        offsetResetPolicy: earliest
+        allowIdleConsumers: "true"
+        scaleToZeroOnInvalidOffset: "false"
+        version: "1.0.0"
+        tls: "enable"
+        sasl: "scram_sha512"
+---
+# ── Retriever Agent ScaledObject ─────────────────────────────
+# Retriever is the heaviest agent (vector search + BM25 + reranking).
+# Higher resource limits and more aggressive scaling.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: keda-agent-retriever
+  namespace: idp-platform
+  labels:
+    app.kubernetes.io/name: agent-retriever
+    app.kubernetes.io/component: keda
+    app.kubernetes.io/part-of: idp-platform
+spec:
+  scaleTargetRef:
+    name: agent-retriever
+  pollingInterval: 10
+  cooldownPeriod: 90
+  idleReplicaCount: 0
+  minReplicaCount: 2
+  maxReplicaCount: 20
+  fallback:
+    failureThreshold: 3
+    replicas: 3
+  advanced:
+    restoreToOriginalReplicaCount: false
+    horizontalPodAutoscalerConfig:
+      name: keda-hpa-agent-retriever
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 15
+          policies:
+            - type: Pods
+              value: 4
+              periodSeconds: 60
+            - type: Percent
+              value: 100
+              periodSeconds: 60
+          selectPolicy: Max
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 180
+          selectPolicy: Min
+  triggers:
+    - type: kafka
+      authenticationRef:
+        name: kafka-sasl-auth
+      metadata:
+        bootstrapServers: kafka-headless.idp-platform.svc.cluster.local:9092
+        consumerGroup: idp-agent-retriever
+        topic: agent.retriever.requests
+        lagThreshold: "3"
+        activationLagThreshold: "1"
+        offsetResetPolicy: earliest
+        allowIdleConsumers: "true"
+        scaleToZeroOnInvalidOffset: "false"
+        tls: "enable"
+        sasl: "scram_sha512"
+---
+# ── Synthesiser Agent ScaledObject ───────────────────────────
+# Synthesiser is I/O-bound (LLM API calls). Scale aggressively
+# on lag since each request waits on external API latency.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: keda-agent-synthesiser
+  namespace: idp-platform
+  labels:
+    app.kubernetes.io/name: agent-synthesiser
+    app.kubernetes.io/component: keda
+    app.kubernetes.io/part-of: idp-platform
+spec:
+  scaleTargetRef:
+    name: agent-synthesiser
+  pollingInterval: 10
+  cooldownPeriod: 60
+  idleReplicaCount: 0
+  minReplicaCount: 1
+  maxReplicaCount: 15
+  fallback:
+    failureThreshold: 3
+    replicas: 2
+  advanced:
+    restoreToOriginalReplicaCount: false
+    horizontalPodAutoscalerConfig:
+      name: keda-hpa-agent-synthesiser
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 15
+          policies:
+            - type: Pods
+              value: 3
+              periodSeconds: 60
+            - type: Percent
+              value: 100
+              periodSeconds: 60
+          selectPolicy: Max
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 120
+          selectPolicy: Min
+  triggers:
+    - type: kafka
+      authenticationRef:
+        name: kafka-sasl-auth
+      metadata:
+        bootstrapServers: kafka-headless.idp-platform.svc.cluster.local:9092
+        consumerGroup: idp-agent-synthesiser
+        topic: agent.synthesiser.requests
+        lagThreshold: "3"
+        activationLagThreshold: "1"
+        offsetResetPolicy: earliest
+        allowIdleConsumers: "true"
+        scaleToZeroOnInvalidOffset: "false"
+        tls: "enable"
+        sasl: "scram_sha512"
+---
+# ── Verifier Agent ScaledObject ──────────────────────────────
+# Verifier is optional (ENABLE_VERIFIER). When enabled,
+# scale conservatively — it processes fewer messages.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: keda-agent-verifier
+  namespace: idp-platform
+  labels:
+    app.kubernetes.io/name: agent-verifier
+    app.kubernetes.io/component: keda
+    app.kubernetes.io/part-of: idp-platform
+spec:
+  scaleTargetRef:
+    name: agent-verifier
+  pollingInterval: 15
+  cooldownPeriod: 120
+  idleReplicaCount: 0
+  minReplicaCount: 1
+  maxReplicaCount: 8
+  fallback:
+    failureThreshold: 3
+    replicas: 1
+  advanced:
+    restoreToOriginalReplicaCount: false
+    horizontalPodAutoscalerConfig:
+      name: keda-hpa-agent-verifier
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 30
+          policies:
+            - type: Pods
+              value: 2
+              periodSeconds: 60
+          selectPolicy: Max
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 180
+          selectPolicy: Min
+  triggers:
+    - type: kafka
+      authenticationRef:
+        name: kafka-sasl-auth
+      metadata:
+        bootstrapServers: kafka-headless.idp-platform.svc.cluster.local:9092
+        consumerGroup: idp-agent-verifier
+        topic: agent.verifier.requests
+        lagThreshold: "5"
+        activationLagThreshold: "1"
+        offsetResetPolicy: earliest
+        allowIdleConsumers: "true"
+        scaleToZeroOnInvalidOffset: "false"
+        tls: "enable"
+        sasl: "scram_sha512"
+---
+# ── Ingestion Worker ScaledObject ────────────────────────────
+# Dual trigger: Kafka lag (document processing queue) +
+# PostgreSQL query (pending ingestion jobs in DB).
+# Ingestion is CPU-heavy (embedding model) so scale cautiously.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: keda-ingestion-worker
+  namespace: idp-platform
+  labels:
+    app.kubernetes.io/name: ingestion-worker
+    app.kubernetes.io/component: keda
+    app.kubernetes.io/part-of: idp-platform
+spec:
+  scaleTargetRef:
+    name: ingestion-worker
+  pollingInterval: 30
+  cooldownPeriod: 300
+  idleReplicaCount: 0
+  minReplicaCount: 1
+  maxReplicaCount: 8
+  fallback:
+    failureThreshold: 3
+    replicas: 2
+  advanced:
+    restoreToOriginalReplicaCount: false
+    horizontalPodAutoscalerConfig:
+      name: keda-hpa-ingestion-worker
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 60
+          policies:
+            - type: Pods
+              value: 2
+              periodSeconds: 120
+          selectPolicy: Max
+        scaleDown:
+          stabilizationWindowSeconds: 600
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 300
+          selectPolicy: Min
+  triggers:
+    # Trigger 1: Kafka consumer lag on ingestion topic
+    - type: kafka
+      authenticationRef:
+        name: kafka-sasl-auth
+      metadata:
+        bootstrapServers: kafka-headless.idp-platform.svc.cluster.local:9092
+        consumerGroup: idp-ingestion-worker
+        topic: ingestion.documents.pending
+        lagThreshold: "2"
+        activationLagThreshold: "1"
+        offsetResetPolicy: earliest
+        allowIdleConsumers: "true"
+        scaleToZeroOnInvalidOffset: "false"
+        tls: "enable"
+        sasl: "scram_sha512"
+    # Trigger 2: PostgreSQL pending documents count
+    - type: postgresql
+      authenticationRef:
+        name: postgres-auth
+      metadata:
+        targetQueryValue: "5"
+        activationTargetQueryValue: "1"
+        query: "SELECT COUNT(*) FROM documents WHERE processing_status = 'pending'"

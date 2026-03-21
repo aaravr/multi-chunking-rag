@@ -1,0 +1,212 @@
+# ============================================================
+# IDP Platform Helm Values — Production defaults
+# ============================================================
+
+global:
+  namespace: idp-platform
+  imageRegistry: ""  # e.g., 123456789.dkr.ecr.us-east-1.amazonaws.com
+  imagePullSecrets: []
+
+# ── Container Images ─────────────────────────────────────────
+images:
+  agent:
+    repository: idp-platform/agent
+    tag: latest
+    pullPolicy: Always
+  streamlit:
+    repository: idp-platform/streamlit
+    tag: latest
+    pullPolicy: Always
+  ingestion:
+    repository: idp-platform/ingestion
+    tag: latest
+    pullPolicy: Always
+
+# ── Kafka Configuration ─────────────────────────────────────
+kafka:
+  bootstrapServers: kafka-headless.idp-platform.svc.cluster.local:9092
+  securityProtocol: SASL_SSL
+  saslMechanism: SCRAM-SHA-512
+  tls:
+    enabled: true
+    secretName: kafka-tls-certs
+
+# ── KEDA Configuration ──────────────────────────────────────
+keda:
+  enabled: true
+
+# ── Agent Scaling Profiles ───────────────────────────────────
+agents:
+  router:
+    enabled: true
+    scaling:
+      pollingInterval: 15
+      cooldownPeriod: 60
+      idleReplicaCount: 0
+      minReplicaCount: 1
+      maxReplicaCount: 10
+      fallbackReplicas: 2
+      lagThreshold: "5"
+      activationLagThreshold: "1"
+      scaleUp:
+        stabilizationWindowSeconds: 30
+        maxPodsPerMinute: 2
+      scaleDown:
+        stabilizationWindowSeconds: 300
+        maxPodsPerMinute: 1
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+
+  retriever:
+    enabled: true
+    scaling:
+      pollingInterval: 10
+      cooldownPeriod: 90
+      idleReplicaCount: 0
+      minReplicaCount: 2
+      maxReplicaCount: 20
+      fallbackReplicas: 3
+      lagThreshold: "3"
+      activationLagThreshold: "1"
+      scaleUp:
+        stabilizationWindowSeconds: 15
+        maxPodsPerMinute: 4
+      scaleDown:
+        stabilizationWindowSeconds: 300
+        maxPodsPerMinute: 1
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: "2"
+        memory: 2Gi
+
+  synthesiser:
+    enabled: true
+    scaling:
+      pollingInterval: 10
+      cooldownPeriod: 60
+      idleReplicaCount: 0
+      minReplicaCount: 1
+      maxReplicaCount: 15
+      fallbackReplicas: 2
+      lagThreshold: "3"
+      activationLagThreshold: "1"
+      scaleUp:
+        stabilizationWindowSeconds: 15
+        maxPodsPerMinute: 3
+      scaleDown:
+        stabilizationWindowSeconds: 300
+        maxPodsPerMinute: 1
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+
+  verifier:
+    enabled: true
+    scaling:
+      pollingInterval: 15
+      cooldownPeriod: 120
+      idleReplicaCount: 0
+      minReplicaCount: 1
+      maxReplicaCount: 8
+      fallbackReplicas: 1
+      lagThreshold: "5"
+      activationLagThreshold: "1"
+      scaleUp:
+        stabilizationWindowSeconds: 30
+        maxPodsPerMinute: 2
+      scaleDown:
+        stabilizationWindowSeconds: 300
+        maxPodsPerMinute: 1
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+
+# ── Ingestion Worker ─────────────────────────────────────────
+ingestion:
+  enabled: true
+  scaling:
+    pollingInterval: 30
+    cooldownPeriod: 300
+    idleReplicaCount: 0
+    minReplicaCount: 1
+    maxReplicaCount: 8
+    fallbackReplicas: 2
+    kafkaLagThreshold: "2"
+    postgresQueryValue: "5"
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      maxPodsPerMinute: 2
+    scaleDown:
+      stabilizationWindowSeconds: 600
+      maxPodsPerMinute: 1
+  resources:
+    requests:
+      cpu: "1"
+      memory: 2Gi
+    limits:
+      cpu: "4"
+      memory: 4Gi
+
+# ── Streamlit UI ─────────────────────────────────────────────
+streamlit:
+  enabled: true
+  replicas: 2
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  ingress:
+    enabled: true
+    className: nginx
+    host: idp.example.com
+    tls:
+      enabled: true
+      secretName: idp-tls-cert
+      clusterIssuer: letsencrypt-prod
+
+# ── Monitoring ───────────────────────────────────────────────
+monitoring:
+  enabled: true
+  podMonitors: true
+  prometheusRules: true
+
+# ── Network Policies ─────────────────────────────────────────
+networkPolicies:
+  enabled: true
+
+# ── Pod Disruption Budgets ───────────────────────────────────
+podDisruptionBudgets:
+  enabled: true
+
+# ── Security ─────────────────────────────────────────────────
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]

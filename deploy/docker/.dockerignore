@@ -1,0 +1,41 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.mypy_cache
+.ruff_cache
+*.egg-info
+dist
+build
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Data
+data/
+*.pdf
+eval_logs/
+
+# Docker/K8s (avoid nesting)
+deploy/
+
+# Docs
+docs/
+*.md
+!requirements*.txt
+
+# Tests (optional — include if you want test capability in container)
+# tests/

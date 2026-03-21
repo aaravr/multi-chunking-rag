@@ -1,0 +1,51 @@
+{{- if .Values.podDisruptionBudgets.enabled }}
+{{- range $name, $agent := .Values.agents }}
+{{- if $agent.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pdb-agent-{{ $name }}
+  namespace: {{ $.Values.global.namespace }}
+  labels:
+    {{- include "idp.labels" $ | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-{{ $name }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.streamlit.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pdb-streamlit-ui
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "idp.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: streamlit-ui
+{{- end }}
+
+{{- if .Values.ingestion.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pdb-ingestion-worker
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "idp.labels" . | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ingestion-worker
+{{- end }}
+{{- end }}

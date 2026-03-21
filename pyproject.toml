@@ -1,0 +1,104 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "multi-chunking-rag"
+version = "0.1.0"
+description = "Enterprise Agentic Intelligent Document Processing (IDP) RAG platform"
+requires-python = ">=3.10"
+readme = "README.md"
+
+dependencies = [
+    "streamlit",
+    "psycopg2-binary",
+    "pgvector",
+    "transformers>=4.40",
+    "torch>=2.1.0",
+    "numpy<2",
+    "pymupdf",
+    "openai",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "tenacity>=8.2.0",
+    "cachetools>=5.3.0",
+    "rank-bm25",
+    "sentence-transformers",
+    "langchain-core>=0.3.0",
+    "langgraph>=0.2.0",
+    "scikit-learn>=1.3.0",
+]
+
+[project.optional-dependencies]
+azure = [
+    "azure-ai-documentintelligence",
+]
+multi-format = [
+    "python-docx",
+    "openpyxl",
+    "beautifulsoup4",
+]
+docling = [
+    "docling",
+]
+feedback-api = [
+    "fastapi",
+    "uvicorn",
+]
+kafka = [
+    "kafka-python",
+    "redis",
+]
+observability = [
+    "opentelemetry-api",
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-otlp-proto-grpc",
+]
+graph = [
+    "neo4j>=5.0.0",
+]
+dev = [
+    "pytest",
+    "pytest-cov",
+]
+# Self-referencing union of all optional groups
+all = [
+    "multi-chunking-rag[azure,multi-format,docling,feedback-api,kafka,observability,graph,dev]",
+]
+
+[tool.setuptools.packages.find]
+include = [
+    "agents*",
+    "app*",
+    "core*",
+    "embedding*",
+    "feedback_loop*",
+    "grounding*",
+    "ingestion*",
+    "retrieval*",
+    "storage*",
+    "synthesis*",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not legacy'"
+markers = [
+    "unit: Unit tests with no external dependencies (DB, LLM, network)",
+    "integration: Integration tests requiring PostgreSQL (TEST_DATABASE_URL)",
+    "external: Tests requiring external services (Azure DI, OpenAI API, Kafka)",
+    "slow: Tests that take >5 seconds to run",
+    "legacy: Tests for deprecated modules retained for backward compatibility",
+]
+# Default: skip legacy tests unless explicitly requested (enforced by addopts)
+# Usage:
+#   pytest tests/ -v                       # all non-legacy tests (default)
+#   pytest tests/ -v -m unit               # unit tests only
+#   pytest tests/ -v -m integration        # DB tests only
+#   pytest tests/ -v -m "not external"     # skip external-dependency tests
+#   pytest tests/ -v -m legacy             # deprecated module tests only
+#   pytest tests/ -v -m ""                 # all tests including legacy
+filterwarnings = [
+    "ignore::DeprecationWarning:agents.feedback_agent",
+    "ignore::DeprecationWarning:agents.retraining_agent",
+]

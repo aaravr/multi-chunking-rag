@@ -1,0 +1,74 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: idp-platform-config
+  namespace: idp-platform
+  labels:
+    app.kubernetes.io/part-of: idp-platform
+data:
+  # ── Feature Flags ────────────────────────────────────────────
+  ENABLE_HYBRID_RETRIEVAL: "true"
+  ENABLE_VERIFIER: "true"
+  ENABLE_RERANKER: "true"
+  ENABLE_DOCUMENT_FACTS: "true"
+  ENABLE_CLASSIFIER: "true"
+  ENABLE_PREPROCESSOR: "true"
+  ENABLE_EXTRACTOR: "true"
+  ENABLE_TRANSFORMER: "true"
+  ENABLE_MULTI_FORMAT: "true"
+  ENABLE_KAFKA_BUS: "true"
+  ENABLE_OTEL: "true"
+  ENABLE_NEO4J: "false"
+  ENABLE_REDIS_WORKING_MEMORY: "true"
+
+  # ── Coverage & Parsing ───────────────────────────────────────
+  COVERAGE_MODE: "llm_fallback"
+  PARSER_BACKEND: "pymupdf"
+  DISABLE_DI: "false"
+  FRONT_MATTER_PAGES: "10"
+
+  # ── Embedding ────────────────────────────────────────────────
+  EMBEDDING_MODEL: "nomic-ai/modernbert-embed-base"
+  EMBEDDING_BATCH_SIZE: "16"
+
+  # ── LLM Provider ────────────────────────────────────────────
+  LLM_PROVIDER: "openai"
+  AZURE_OPENAI_API_VERSION: "2024-06-01"
+
+  # ── Kafka ────────────────────────────────────────────────────
+  KAFKA_BOOTSTRAP_SERVERS: "kafka-headless.idp-platform.svc.cluster.local:9092"
+  KAFKA_COMPRESSION_TYPE: "lz4"
+  KAFKA_ACKS: "all"
+  KAFKA_PRODUCER_RETRIES: "5"
+  KAFKA_MAX_POLL_RECORDS: "10"
+  KAFKA_SESSION_TIMEOUT_MS: "30000"
+  KAFKA_HEARTBEAT_INTERVAL_MS: "10000"
+  KAFKA_ENABLE_DLQ: "true"
+  KAFKA_ENABLE_IDEMPOTENCY: "true"
+  KAFKA_IDEMPOTENCY_TTL_S: "300"
+  KAFKA_IDEMPOTENCY_MAX_ENTRIES: "50000"
+  KAFKA_SECURITY_PROTOCOL: "SASL_SSL"
+  KAFKA_SASL_MECHANISM: "SCRAM-SHA-512"
+
+  # ── Database ─────────────────────────────────────────────────
+  DB_POOL_SIZE: "10"
+  DB_POOL_MIN: "2"
+  DB_POOL_OVERFLOW: "20"
+  BULK_INSERT_BATCH_SIZE: "500"
+
+  # ── Scaling ──────────────────────────────────────────────────
+  INGESTION_WORKER_THREADS: "4"
+  KAFKA_FANOUT_WORKERS: "16"
+
+  # ── Observability ────────────────────────────────────────────
+  OTEL_EXPORTER_ENDPOINT: "otel-collector.idp-platform-monitoring.svc.cluster.local:4317"
+  OTEL_SAMPLE_RATE: "0.1"
+  OTEL_EXPORT_CONSOLE: "false"
+
+  # ── Redis ────────────────────────────────────────────────────
+  REDIS_URL: "redis://redis-master.idp-platform.svc.cluster.local:6379/0"
+  REDIS_WORKING_MEMORY_TTL: "900"
+
+  # ── MCP ──────────────────────────────────────────────────────
+  MCP_REFERENCE_SERVER_URL: "http://mcp-reference.idp-platform.svc.cluster.local:8100"
+  MCP_REQUEST_TIMEOUT_S: "10"

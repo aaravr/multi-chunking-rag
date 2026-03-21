@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from dataclasses import dataclass
 from typing import List, Tuple
 
 import numpy as np
@@ -9,6 +10,21 @@ import numpy as np
 from core.config import settings
 from core.contracts import CanonicalPage, CanonicalSpan, ChunkRecord
 from embedding.model_registry import get_embedding_model
+
+# ── Named constants for chunk classification thresholds ──────────────
+MAX_HEADING_LENGTH = 80
+MAX_NUMBERED_HEADING_LENGTH = 100
+MAX_BOILERPLATE_LENGTH = 120
+
+
+@dataclass(frozen=True)
+class SpanLineage:
+    """Lineage metadata collected from canonical spans overlapping a chunk."""
+    polygons: List[dict]
+    page_numbers: List[int]
+    source_type: str
+    heading_path: str
+    section_id: str
 
 
 def late_chunk_embeddings(
@@ -37,93 +53,117 @@ def late_chunk_embeddings(
     processed_macros = 0
 
     for page, macro_chunks in macro_chunks_per_page:
-        for span in page.spans:
-            if not span.is_table:
-                continue
-            tokenized = embedder.tokenize(span.text)
-            token_embeddings = embedder.encode(tokenized)
-            pooled = token_embeddings.mean(dim=0).cpu().numpy().astype(np.float32)
-            chunks.append(
-                ChunkRecord(
-                    chunk_id=str(uuid.uuid4()),
-                    doc_id=page.doc_id,
-                    page_numbers=[span.page_number],
-                    macro_id=macro_id,
-                    child_id=0,
-                    chunk_type="table",
-                    text_content=span.text,
-                    char_start=span.char_start,
-                    char_end=span.char_end,
-                    polygons=span.polygons,
-                    source_type=span.source_type,
-                    embedding_model=settings.embedding_model,
-                    embedding_dim=settings.embedding_dim,
-                    embedding=pooled.tolist(),
-                    heading_path=span.heading_path,
-                    section_id=span.section_id,
-                )
-            )
-            macro_id += 1
+        table_chunks, macro_id = _process_table_spans(
+            page, embedder, macro_id
+        )
+        chunks.extend(table_chunks)
+
         if not macro_chunks:
             continue
+
         for macro_text, base_offset in macro_chunks:
             if progress_cb:
-                progress_cb(
-                    "embed",
-                    processed_macros,
-                    total_macros,
-                )
-            tokenized = embedder.tokenize(macro_text)
-            token_embeddings = embedder.encode(tokenized)
-            child_spans = _build_child_spans(
-                tokenized.offsets,
-                child_target_tokens,
+                progress_cb("embed", processed_macros, total_macros)
+
+            child_chunks, child_count = _process_macro_chunk(
+                page, embedder, macro_text, base_offset,
+                child_target_tokens, macro_id,
             )
-            child_id = 0
-            for char_start, char_end, token_indices in child_spans:
-                if char_end <= char_start:
-                    continue
-                span_text = macro_text[char_start:char_end]
-                if not span_text.strip():
-                    continue
-                span_embeddings = token_embeddings[token_indices]
-                pooled = span_embeddings.mean(dim=0).cpu().numpy().astype(np.float32)
-                global_start = base_offset + char_start
-                global_end = base_offset + char_end
-                polygons, page_numbers, source_type, heading_path, section_id = _collect_span_lineage(
-                    page.spans, global_start, global_end
-                )
-                chunks.append(
-                    ChunkRecord(
-                        chunk_id=str(uuid.uuid4()),
-                        doc_id=page.doc_id,
-                        page_numbers=page_numbers,
-                        macro_id=macro_id,
-                        child_id=child_id,
-                        chunk_type=_classify_chunk_type(span_text),
-                        text_content=span_text,
-                        char_start=global_start,
-                        char_end=global_end,
-                        polygons=polygons,
-                        source_type=source_type,
-                        embedding_model=settings.embedding_model,
-                        embedding_dim=settings.embedding_dim,
-                        embedding=pooled.tolist(),
-                        heading_path=heading_path,
-                        section_id=section_id,
-                    )
-                )
-                child_id += 1
+            chunks.extend(child_chunks)
+
             macro_id += 1
             processed_macros += 1
             if progress_cb:
-                progress_cb(
-                    "embed",
-                    processed_macros,
-                    total_macros,
-                )
+                progress_cb("embed", processed_macros, total_macros)
 
     return chunks
+
+
+def _process_table_spans(
+    page: CanonicalPage,
+    embedder,
+    macro_id: int,
+) -> Tuple[List[ChunkRecord], int]:
+    """Embed each table span as its own macro chunk."""
+    chunks: List[ChunkRecord] = []
+    for span in page.spans:
+        if not span.is_table:
+            continue
+        tokenized = embedder.tokenize(span.text)
+        token_embeddings = embedder.encode(tokenized)
+        pooled = token_embeddings.mean(dim=0).cpu().numpy().astype(np.float32)
+        chunks.append(
+            ChunkRecord(
+                chunk_id=str(uuid.uuid4()),
+                doc_id=page.doc_id,
+                page_numbers=[span.page_number],
+                macro_id=macro_id,
+                child_id=0,
+                chunk_type="table",
+                text_content=span.text,
+                char_start=span.char_start,
+                char_end=span.char_end,
+                polygons=span.polygons,
+                source_type=span.source_type,
+                embedding_model=settings.embedding_model,
+                embedding_dim=settings.embedding_dim,
+                embedding=pooled.tolist(),
+                heading_path=span.heading_path,
+                section_id=span.section_id,
+            )
+        )
+        macro_id += 1
+    return chunks, macro_id
+
+
+def _process_macro_chunk(
+    page: CanonicalPage,
+    embedder,
+    macro_text: str,
+    base_offset: int,
+    child_target_tokens: int,
+    macro_id: int,
+) -> Tuple[List[ChunkRecord], int]:
+    """Tokenize a macro chunk, split into child spans, and embed each child."""
+    chunks: List[ChunkRecord] = []
+    tokenized = embedder.tokenize(macro_text)
+    token_embeddings = embedder.encode(tokenized)
+    child_spans = _build_child_spans(tokenized.offsets, child_target_tokens)
+
+    child_id = 0
+    for char_start, char_end, token_indices in child_spans:
+        if char_end <= char_start:
+            continue
+        span_text = macro_text[char_start:char_end]
+        if not span_text.strip():
+            continue
+        span_embeddings = token_embeddings[token_indices]
+        pooled = span_embeddings.mean(dim=0).cpu().numpy().astype(np.float32)
+        global_start = base_offset + char_start
+        global_end = base_offset + char_end
+        lineage = _collect_span_lineage(page.spans, global_start, global_end)
+        chunks.append(
+            ChunkRecord(
+                chunk_id=str(uuid.uuid4()),
+                doc_id=page.doc_id,
+                page_numbers=lineage.page_numbers,
+                macro_id=macro_id,
+                child_id=child_id,
+                chunk_type=_classify_chunk_type(span_text),
+                text_content=span_text,
+                char_start=global_start,
+                char_end=global_end,
+                polygons=lineage.polygons,
+                source_type=lineage.source_type,
+                embedding_model=settings.embedding_model,
+                embedding_dim=settings.embedding_dim,
+                embedding=pooled.tolist(),
+                heading_path=lineage.heading_path,
+                section_id=lineage.section_id,
+            )
+        )
+        child_id += 1
+    return chunks, child_id
 
 
 def _build_macro_chunks(
@@ -172,7 +212,7 @@ def _build_child_spans(
 
 def _collect_span_lineage(
     spans: List[CanonicalSpan], char_start: int, char_end: int
-) -> Tuple[List[dict], List[int], str, str, str]:
+) -> SpanLineage:
     polygons: List[dict] = []
     page_numbers: List[int] = []
     source_type = "native"
@@ -189,7 +229,13 @@ def _collect_span_lineage(
         if not heading_path:
             heading_path = span.heading_path
             section_id = span.section_id
-    return polygons, sorted(page_numbers), source_type, heading_path, section_id
+    return SpanLineage(
+        polygons=polygons,
+        page_numbers=sorted(page_numbers),
+        source_type=source_type,
+        heading_path=heading_path,
+        section_id=section_id,
+    )
 
 
 def _classify_chunk_type(text: str) -> str:
@@ -204,13 +250,13 @@ def _classify_chunk_type(text: str) -> str:
 
 
 def _looks_like_heading(text: str) -> bool:
-    if text.isupper() and len(text) <= 80:
+    if text.isupper() and len(text) <= MAX_HEADING_LENGTH:
         return True
-    if text.endswith(":") and len(text) <= 80:
+    if text.endswith(":") and len(text) <= MAX_HEADING_LENGTH:
         return True
-    if text.istitle() and len(text) <= 80:
+    if text.istitle() and len(text) <= MAX_HEADING_LENGTH:
         return True
-    if re.match(r"^\d+(\.\d+)*\s+\S", text) and len(text) <= 100:
+    if re.match(r"^\d+(\.\d+)*\s+\S", text) and len(text) <= MAX_NUMBERED_HEADING_LENGTH:
         return True
     if re.match(r"^Note\s+\d+", text, re.IGNORECASE):
         return True
@@ -218,8 +264,8 @@ def _looks_like_heading(text: str) -> bool:
 
 
 def _looks_like_boilerplate(text: str) -> bool:
-    if "ANNUAL REPORT" in text.upper() and len(text) <= 120:
+    if "ANNUAL REPORT" in text.upper() and len(text) <= MAX_BOILERPLATE_LENGTH:
         return True
-    if "CONSOLIDATED FINANCIAL STATEMENTS" in text.upper() and len(text) <= 120:
+    if "CONSOLIDATED FINANCIAL STATEMENTS" in text.upper() and len(text) <= MAX_BOILERPLATE_LENGTH:
         return True
     return False

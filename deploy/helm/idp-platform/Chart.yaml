@@ -1,0 +1,22 @@
+apiVersion: v2
+name: idp-platform
+description: Enterprise IDP RAG Platform with KEDA autoscaling
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - idp
+  - rag
+  - keda
+  - document-processing
+  - agents
+maintainers:
+  - name: IDP Platform Team
+home: https://github.com/your-org/multi-chunking-rag
+sources:
+  - https://github.com/your-org/multi-chunking-rag
+dependencies:
+  - name: keda
+    version: "2.16.*"
+    repository: https://kedacore.github.io/charts
+    condition: keda.enabled

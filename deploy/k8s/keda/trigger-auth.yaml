@@ -1,0 +1,42 @@
+# ============================================================
+# KEDA TriggerAuthentication — Kafka SASL/TLS credentials
+# Used by all Kafka-based ScaledObjects
+# ============================================================
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: kafka-sasl-auth
+  namespace: idp-platform
+  labels:
+    app.kubernetes.io/part-of: idp-platform
+    app.kubernetes.io/component: keda
+spec:
+  secretTargetRef:
+    - parameter: sasl
+      name: idp-platform-secrets
+      key: KAFKA_SASL_USERNAME
+    - parameter: password
+      name: idp-platform-secrets
+      key: KAFKA_SASL_PASSWORD
+  env:
+    - parameter: tls
+      name: enable
+      containerName: ""
+---
+# ============================================================
+# KEDA TriggerAuthentication — PostgreSQL credentials
+# Used by PostgreSQL-based ScaledObjects (ingestion queue)
+# ============================================================
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: postgres-auth
+  namespace: idp-platform
+  labels:
+    app.kubernetes.io/part-of: idp-platform
+    app.kubernetes.io/component: keda
+spec:
+  secretTargetRef:
+    - parameter: connection
+      name: idp-platform-secrets
+      key: DATABASE_URL

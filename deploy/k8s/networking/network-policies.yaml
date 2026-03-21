@@ -1,0 +1,189 @@
+# ============================================================
+# NetworkPolicies — zero-trust per-component isolation
+# ============================================================
+
+# ── Default deny all ingress in namespace ────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: idp-platform
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# ── Default deny all egress in namespace ─────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+  namespace: idp-platform
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  # Allow DNS resolution for all pods
+  egress:
+    - to: []
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# ── Streamlit UI: allow ingress from ingress controller ──────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-streamlit-ingress
+  namespace: idp-platform
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: streamlit-ui
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8501
+---
+# ── Streamlit UI: allow egress to Kafka, PostgreSQL, Redis ───
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-streamlit-egress
+  namespace: idp-platform
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: streamlit-ui
+  policyTypes:
+    - Egress
+  egress:
+    - to: []
+      ports:
+        # DNS
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+        # PostgreSQL
+        - protocol: TCP
+          port: 5432
+        # Redis
+        - protocol: TCP
+          port: 6379
+        # Kafka
+        - protocol: TCP
+          port: 9092
+        # OpenAI API / Azure OpenAI (HTTPS)
+        - protocol: TCP
+          port: 443
+        # MCP reference server
+        - protocol: TCP
+          port: 8100
+        # OTel collector
+        - protocol: TCP
+          port: 4317
+---
+# ── Agents: allow egress to Kafka, PostgreSQL, Redis, LLM ───
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-agent-egress
+  namespace: idp-platform
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: agent
+  policyTypes:
+    - Egress
+  egress:
+    - to: []
+      ports:
+        # DNS
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+        # PostgreSQL
+        - protocol: TCP
+          port: 5432
+        # Redis
+        - protocol: TCP
+          port: 6379
+        # Kafka
+        - protocol: TCP
+          port: 9092
+        # OpenAI / Azure OpenAI
+        - protocol: TCP
+          port: 443
+        # MCP reference server
+        - protocol: TCP
+          port: 8100
+        # OTel collector
+        - protocol: TCP
+          port: 4317
+---
+# ── Ingestion worker: same as agents + Azure DI ─────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingestion-egress
+  namespace: idp-platform
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ingestion-worker
+  policyTypes:
+    - Egress
+  egress:
+    - to: []
+      ports:
+        # DNS
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+        # PostgreSQL
+        - protocol: TCP
+          port: 5432
+        # Redis
+        - protocol: TCP
+          port: 6379
+        # Kafka
+        - protocol: TCP
+          port: 9092
+        # Azure Document Intelligence / OpenAI / Azure OpenAI
+        - protocol: TCP
+          port: 443
+        # OTel collector
+        - protocol: TCP
+          port: 4317
+---
+# ── Allow Prometheus scraping ────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrape
+  namespace: idp-platform
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: agent
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: idp-platform-monitoring
+      ports:
+        - protocol: TCP
+          port: 9090

@@ -1,8 +1,21 @@
+"""Database schema contract validator.
+
+Enforces operational invariants beyond basic column presence:
+1. Required columns exist in every validated table
+2. Required unique constraints exist (deduplication, idempotency)
+3. Required foreign keys exist (referential integrity)
+4. Required indexes exist (query performance for runtime tables)
+
+This is a **runtime safety net**, not a migration tool. If validation
+fails, the remediation is to run ``python storage/setup_db.py``.
+"""
+
 from typing import Dict, List
 
 from storage.db import get_connection
 
 REQUIRED_SCHEMA: Dict[str, List[str]] = {
+    # ── Core PoC Tables ──────────────────────────────────────────────
     "chunks": [
         "chunk_id",
         "doc_id",
@@ -18,6 +31,12 @@ REQUIRED_SCHEMA: Dict[str, List[str]] = {
         "embedding_dim",
         "embedding",
         "chunk_type",
+        # Lineage fields — required by §2.1 (Deterministic Lineage invariant)
+        "heading_path",
+        "section_id",
+        # Enterprise classification fields — added by migration 004
+        "document_type",
+        "classification_label",
     ],
     "pages": [
         "doc_id",
@@ -34,6 +53,10 @@ REQUIRED_SCHEMA: Dict[str, List[str]] = {
         "sha256",
         "page_count",
         "created_at",
+        # Enterprise fields — added by migration 004
+        "document_type",
+        "classification_label",
+        "updated_at",
     ],
     "document_facts": [
         "doc_id",
@@ -47,13 +70,242 @@ REQUIRED_SCHEMA: Dict[str, List[str]] = {
         "evidence_excerpt",
         "created_at",
     ],
+    # ── Enterprise Tables (migration 004) ────────────────────────────
+    "audit_log": [
+        "log_id",
+        "agent_id",
+        "event_type",
+        "model_id",
+        "full_prompt",
+        "full_response",
+        "input_tokens",
+        "output_tokens",
+        "temperature",
+        "timestamp",
+    ],
+    # ── Feedback Loop Tables (migration 009) — canonical path ────────
+    "prediction_traces": [
+        "trace_id",
+        "query_id",
+        "boundary_client",
+        "boundary_division",
+        "boundary_jurisdiction",
+        "created_at",
+    ],
+    "feedback_events": [
+        "feedback_id",
+        "trace_id",
+        "boundary_client",
+        "boundary_division",
+        "boundary_jurisdiction",
+        "rating",
+        "created_at",
+    ],
+    "feedback_attributions": [
+        "attribution_id",
+        "feedback_id",
+        "impacted_layers",
+        "attribution_method",
+    ],
+    "retraining_jobs": [
+        "job_id",
+        "layer",
+        "boundary_client",
+        "trigger_type",
+        "status",
+        "candidate_id",
+    ],
+    "model_candidates": [
+        "candidate_id",
+        "layer",
+        "boundary_client",
+        "stage",
+    ],
+    "evaluation_reports": [
+        "report_id",
+        "candidate_id",
+        "layer",
+        "boundary_client",
+    ],
+    # ── Training Row Tables (migration 009) ──────────────────────────
+    "training_rows_planner": [
+        "row_id",
+        "source_feedback_ids",
+        "boundary_client",
+        "accuracy",
+    ],
+    "training_rows_classifier": [
+        "row_id",
+        "source_feedback_ids",
+        "boundary_client",
+        "is_correct",
+    ],
+    "training_rows_chunking": [
+        "row_id",
+        "source_feedback_ids",
+        "boundary_client",
+        "evidence_recall",
+    ],
+    "training_rows_extraction": [
+        "row_id",
+        "source_feedback_ids",
+        "boundary_client",
+        "field_name",
+        "is_correct",
+    ],
+    "training_rows_calibration": [
+        "row_id",
+        "source_feedback_ids",
+        "boundary_client",
+        "is_correct",
+        "confidence_bucket",
+    ],
 }
 
 
+# Unique constraints that MUST exist (table → list of column-sets).
+# Each entry is a frozenset of column names that must form a unique constraint.
+REQUIRED_UNIQUE_CONSTRAINTS: Dict[str, List[frozenset]] = {
+    "documents": [frozenset({"sha256"})],
+    "chunks": [frozenset({"doc_id", "macro_id", "child_id"})],
+}
+
+# Required foreign keys (child_table → list of (child_cols, parent_table, parent_cols)).
+REQUIRED_FOREIGN_KEYS: Dict[str, List[tuple]] = {
+    "feedback_events": [
+        (("trace_id",), "prediction_traces", ("trace_id",)),
+    ],
+    "feedback_attributions": [
+        (("feedback_id",), "feedback_events", ("feedback_id",)),
+    ],
+    "retraining_jobs": [
+        (("candidate_id",), "model_candidates", ("candidate_id",)),
+    ],
+    "evaluation_reports": [
+        (("candidate_id",), "model_candidates", ("candidate_id",)),
+    ],
+}
+
+# Required indexes (table → list of column-sets that must appear in at least one index).
+REQUIRED_INDEXES: Dict[str, List[frozenset]] = {
+    # Core runtime tables
+    "prediction_traces": [
+        frozenset({"query_id"}),
+        frozenset({"boundary_client"}),
+    ],
+    "feedback_events": [
+        frozenset({"boundary_client"}),
+        frozenset({"trace_id"}),
+        frozenset({"rating"}),
+    ],
+    "feedback_attributions": [
+        frozenset({"feedback_id"}),
+    ],
+    # Training row tables — boundary index for isolation queries
+    "training_rows_planner": [
+        frozenset({"boundary_client"}),
+    ],
+    "training_rows_classifier": [
+        frozenset({"boundary_client"}),
+    ],
+    "training_rows_chunking": [
+        frozenset({"boundary_client"}),
+    ],
+    "training_rows_extraction": [
+        frozenset({"boundary_client"}),
+        frozenset({"field_name"}),
+    ],
+    "training_rows_calibration": [
+        frozenset({"boundary_client"}),
+        frozenset({"confidence_bucket"}),
+    ],
+    # Model lifecycle tables
+    "model_candidates": [
+        frozenset({"layer"}),
+        frozenset({"stage"}),
+    ],
+    "retraining_jobs": [
+        frozenset({"layer"}),
+        frozenset({"status"}),
+    ],
+}
+
+
+def validate_contract_definitions() -> None:
+    """Validate internal consistency of contract definitions (no DB needed).
+
+    Catches typos and drift in the contract declarations themselves:
+    1. FK child tables must exist in REQUIRED_SCHEMA
+    2. FK parent tables must exist in REQUIRED_SCHEMA
+    3. FK child columns must exist in the child table's REQUIRED_SCHEMA entry
+    4. Index tables must exist in REQUIRED_SCHEMA
+    5. Unique constraint tables must exist in REQUIRED_SCHEMA
+    6. Unique constraint columns must exist in the table's REQUIRED_SCHEMA entry
+
+    This can be called in unit tests without a running database.
+    """
+    errors: List[str] = []
+    all_tables = set(REQUIRED_SCHEMA.keys())
+
+    # FK child and parent tables must exist in schema
+    for child_table, fk_defs in REQUIRED_FOREIGN_KEYS.items():
+        if child_table not in all_tables:
+            errors.append(
+                f"FK child table '{child_table}' not in REQUIRED_SCHEMA"
+            )
+        for child_cols, parent_table, parent_cols in fk_defs:
+            if parent_table not in all_tables:
+                errors.append(
+                    f"FK parent table '{parent_table}' (referenced by "
+                    f"'{child_table}') not in REQUIRED_SCHEMA"
+                )
+            # FK child columns must exist in schema
+            child_schema_cols = set(REQUIRED_SCHEMA.get(child_table, []))
+            for col in child_cols:
+                if col not in child_schema_cols:
+                    errors.append(
+                        f"FK column '{child_table}.{col}' not in REQUIRED_SCHEMA"
+                    )
+
+    # Index tables must exist in schema
+    for table in REQUIRED_INDEXES:
+        if table not in all_tables:
+            errors.append(f"Index table '{table}' not in REQUIRED_SCHEMA")
+
+    # Unique constraint tables and columns must exist in schema
+    for table, constraint_sets in REQUIRED_UNIQUE_CONSTRAINTS.items():
+        if table not in all_tables:
+            errors.append(
+                f"Unique constraint table '{table}' not in REQUIRED_SCHEMA"
+            )
+        table_cols = set(REQUIRED_SCHEMA.get(table, []))
+        for col_set in constraint_sets:
+            for col in col_set:
+                if col not in table_cols:
+                    errors.append(
+                        f"Unique constraint column '{table}.{col}' "
+                        "not in REQUIRED_SCHEMA"
+                    )
+
+    if errors:
+        raise RuntimeError(
+            f"Schema contract definition errors: {'; '.join(errors)}"
+        )
+
+
 def check_schema_contract() -> None:
-    missing = {}
+    """Validate the database schema against the contract.
+
+    Checks:
+    1. All required columns exist in each table
+    2. Required unique constraints exist
+    3. Required foreign keys exist
+    4. Required indexes exist
+    """
+    errors: List[str] = []
     with get_connection() as conn:
         with conn.cursor() as cursor:
+            # 1. Column presence
             for table, columns in REQUIRED_SCHEMA.items():
                 cursor.execute(
                     """
@@ -65,15 +317,108 @@ def check_schema_contract() -> None:
                     (table,),
                 )
                 existing = {row[0] for row in cursor.fetchall()}
+                if not existing:
+                    errors.append(f"Table {table} does not exist")
+                    continue
                 missing_cols = [col for col in columns if col not in existing]
                 if missing_cols:
-                    missing[table] = missing_cols
-    if missing:
-        details = "; ".join(
-            f"{table}: {', '.join(cols)}" for table, cols in missing.items()
-        )
+                    errors.append(
+                        f"Missing columns in {table}: {', '.join(missing_cols)}"
+                    )
+
+            # 2. Unique constraints
+            for table, constraint_sets in REQUIRED_UNIQUE_CONSTRAINTS.items():
+                cursor.execute(
+                    """
+                    SELECT
+                        tc.constraint_name,
+                        array_agg(kcu.column_name ORDER BY kcu.ordinal_position)
+                    FROM information_schema.table_constraints tc
+                    JOIN information_schema.key_column_usage kcu
+                        ON tc.constraint_name = kcu.constraint_name
+                        AND tc.table_schema = kcu.table_schema
+                    WHERE tc.table_schema = 'public'
+                      AND tc.table_name = %s
+                      AND tc.constraint_type IN ('UNIQUE', 'PRIMARY KEY')
+                    GROUP BY tc.constraint_name
+                    """,
+                    (table,),
+                )
+                existing_constraints = [
+                    frozenset(row[1]) for row in cursor.fetchall()
+                ]
+                for required_cols in constraint_sets:
+                    if required_cols not in existing_constraints:
+                        errors.append(
+                            f"Missing UNIQUE constraint on {table}"
+                            f"({', '.join(sorted(required_cols))})"
+                        )
+
+            # 3. Foreign keys
+            for child_table, fk_defs in REQUIRED_FOREIGN_KEYS.items():
+                cursor.execute(
+                    """
+                    SELECT
+                        kcu.column_name,
+                        ccu.table_name AS parent_table,
+                        ccu.column_name AS parent_column
+                    FROM information_schema.table_constraints tc
+                    JOIN information_schema.key_column_usage kcu
+                        ON tc.constraint_name = kcu.constraint_name
+                        AND tc.table_schema = kcu.table_schema
+                    JOIN information_schema.constraint_column_usage ccu
+                        ON tc.constraint_name = ccu.constraint_name
+                        AND tc.table_schema = ccu.table_schema
+                    WHERE tc.table_schema = 'public'
+                      AND tc.table_name = %s
+                      AND tc.constraint_type = 'FOREIGN KEY'
+                    """,
+                    (child_table,),
+                )
+                existing_fks = [
+                    (row[0], row[1], row[2]) for row in cursor.fetchall()
+                ]
+                for child_cols, parent_table, parent_cols in fk_defs:
+                    found = any(
+                        fk[0] in child_cols and fk[1] == parent_table and fk[2] in parent_cols
+                        for fk in existing_fks
+                    )
+                    if not found:
+                        errors.append(
+                            f"Missing FK on {child_table}"
+                            f"({', '.join(child_cols)}) -> "
+                            f"{parent_table}({', '.join(parent_cols)})"
+                        )
+
+            # 4. Indexes
+            for table, index_sets in REQUIRED_INDEXES.items():
+                cursor.execute(
+                    """
+                    SELECT indexdef
+                    FROM pg_indexes
+                    WHERE schemaname = 'public'
+                      AND tablename = %s
+                    """,
+                    (table,),
+                )
+                index_defs = [row[0].lower() for row in cursor.fetchall()]
+                for required_cols in index_sets:
+                    # Check if any index covers the required columns
+                    found = False
+                    for idx_def in index_defs:
+                        if all(col in idx_def for col in required_cols):
+                            found = True
+                            break
+                    if not found:
+                        errors.append(
+                            f"Missing index on {table}"
+                            f"({', '.join(sorted(required_cols))})"
+                        )
+
+    if errors:
+        details = "; ".join(errors)
         raise RuntimeError(
-            "Schema contract check failed. Missing columns: "
-            f"{details}. Remediation: run `python storage/setup_db.py` "
+            f"Schema contract check failed. {details}. "
+            "Remediation: run `python storage/setup_db.py` "
             "to apply schema and migrations."
         )

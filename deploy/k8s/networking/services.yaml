@@ -1,0 +1,43 @@
+# ============================================================
+# Services for IDP Platform
+# ============================================================
+
+# ── Streamlit UI Service ─────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: streamlit-ui
+  namespace: idp-platform
+  labels:
+    app.kubernetes.io/name: streamlit-ui
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: idp-platform
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: streamlit-ui
+---
+# ── MCP Reference Server Service ────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-reference
+  namespace: idp-platform
+  labels:
+    app.kubernetes.io/name: mcp-reference
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: idp-platform
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8100
+      targetPort: 8100
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: mcp-reference

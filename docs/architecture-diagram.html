@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Multi-Chunking RAG — Azure Infrastructure Architecture</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #fff; }
+  .canvas { width: 1600px; height: 1060px; position: relative; background: #fff; }
+
+  /* Node: icon + label */
+  .nd { position: absolute; display: flex; flex-direction: column; align-items: center; text-align: center; z-index: 10; }
+  .nd .ic { width: 68px; height: 68px; display: flex; align-items: center; justify-content: center; margin-bottom: 5px; }
+  .nd .ic svg { width: 60px; height: 60px; }
+  .nd .lb { font-size: 12.5px; font-weight: 700; color: #1a1a1a; line-height: 1.25; max-width: 150px; }
+  .nd .sl { font-size: 10px; color: #767676; max-width: 150px; line-height: 1.2; margin-top: 1px; }
+
+  /* Namespace box */
+  .ns { position: absolute; border-radius: 5px; z-index: 1; }
+  .ns .nt { position: absolute; top: 7px; left: 12px; font-size: 12px; font-weight: 700; color: #444; }
+  .ns .nsub { position: absolute; bottom: 5px; right: 10px; font-size: 9px; color: #aaa; font-style: italic; }
+
+  /* Arrow label */
+  .al { position: absolute; font-size: 9.5px; color: #555; z-index: 15; white-space: nowrap; font-weight: 600; }
+
+  /* Section header */
+  .sh { position: absolute; font-size: 14px; font-weight: 700; color: #1a1a1a; z-index: 15; }
+
+  svg.ov { position: absolute; top: 0; left: 0; width: 1600px; height: 1060px; z-index: 5; pointer-events: none; }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+  <!-- ════════ SVG ARROWS ════════ -->
+  <svg class="ov" viewBox="0 0 1600 1060">
+    <defs>
+      <marker id="a" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#444"/></marker>
+      <marker id="ad" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#999"/></marker>
+      <marker id="ag" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#10a37f"/></marker>
+      <marker id="ab" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#0078d4"/></marker>
+    </defs>
+
+    <!-- ═══ TIER 1: Request flow (horizontal, left→right) ═══ -->
+    <!-- Client → App Gateway -->
+    <line x1="150" y1="240" x2="228" y2="240" stroke="#444" stroke-width="2.5" marker-end="url(#a)"/>
+    <!-- App Gateway → AKS/Streamlit -->
+    <line x1="330" y1="240" x2="418" y2="240" stroke="#444" stroke-width="2.5" marker-end="url(#a)"/>
+    <!-- Streamlit → Agent Pods (within AKS) -->
+    <line x1="538" y1="195" x2="598" y2="195" stroke="#444" stroke-width="2" marker-end="url(#a)"/>
+    <!-- Agent Pods → Retrieval Pods (within AKS) -->
+    <line x1="728" y1="195" x2="778" y2="195" stroke="#444" stroke-width="2" marker-end="url(#a)"/>
+
+    <!-- ═══ AKS → External services (4 parallel horizontal arrows, no crossing) ═══ -->
+    <!-- Retrieval → PostgreSQL (y=160) -->
+    <line x1="910" y1="160" x2="1195" y2="160" stroke="#336791" stroke-width="2.5" marker-end="url(#a)"/>
+    <!-- Agent Pods → Azure OpenAI (y=230) -->
+    <line x1="910" y1="230" x2="1195" y2="230" stroke="#10a37f" stroke-width="2.5" marker-end="url(#ag)"/>
+    <!-- Ingestion → Blob Storage (y=340) -->
+    <line x1="910" y1="340" x2="1195" y2="340" stroke="#0078d4" stroke-width="2" marker-end="url(#ab)"/>
+    <!-- Ingestion → Doc Intelligence (y=410) -->
+    <line x1="910" y1="410" x2="1195" y2="410" stroke="#0078d4" stroke-width="2" marker-end="url(#ab)"/>
+
+    <!-- ═══ AKS ↔ Confluent Kafka (vertical) ═══ -->
+    <!-- Down from AKS to Kafka -->
+    <line x1="640" y1="480" x2="640" y2="535" stroke="#444" stroke-width="2.5" marker-end="url(#a)"/>
+    <!-- Up from Kafka to AKS (consume) -->
+    <line x1="680" y1="535" x2="680" y2="480" stroke="#444" stroke-width="2" marker-end="url(#a)"/>
+
+    <!-- ═══ CI/CD flow (horizontal) ═══ -->
+    <!-- Dev/Ops → Pipelines -->
+    <line x1="148" y1="730" x2="268" y2="730" stroke="#444" stroke-width="2.5" marker-end="url(#a)"/>
+    <!-- Pipelines → ACR -->
+    <line x1="380" y1="730" x2="478" y2="730" stroke="#d83b01" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#a)"/>
+    <!-- ACR → AKS (vertical up) -->
+    <line x1="540" y1="695" x2="540" y2="480" stroke="#d83b01" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#a)"/>
+
+    <!-- ═══ Platform services → AKS (vertical dashed, no crossing) ═══ -->
+    <!-- Entra ID → AKS -->
+    <line x1="340" y1="880" x2="340" y2="865" stroke="#999" stroke-width="1.5" stroke-dasharray="5 3"/>
+    <line x1="340" y1="865" x2="450" y2="865" stroke="#999" stroke-width="1.5" stroke-dasharray="5 3"/>
+    <line x1="450" y1="865" x2="450" y2="480" stroke="#999" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#ad)"/>
+    <!-- Monitor ← AKS -->
+    <line x1="780" y1="480" x2="780" y2="870" stroke="#999" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#ad)"/>
+    <!-- Key Vault ← AKS -->
+    <line x1="860" y1="480" x2="860" y2="810" stroke="#999" stroke-width="1.5" stroke-dasharray="5 3"/>
+    <line x1="860" y1="810" x2="1060" y2="810" stroke="#999" stroke-width="1.5" stroke-dasharray="5 3"/>
+    <line x1="1060" y1="810" x2="1060" y2="870" stroke="#999" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#ad)"/>
+  </svg>
+
+  <!-- ════════════════════════════════════════════════════ -->
+  <!-- TITLE                                                -->
+  <!-- ════════════════════════════════════════════════════ -->
+  <div style="position:absolute;left:0;top:15px;width:1600px;text-align:center;z-index:15;">
+    <span style="font-size:22px;font-weight:800;color:#1a1a1a;letter-spacing:-0.5px;">Multi-Chunking RAG — Azure Infrastructure Architecture</span>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════ -->
+  <!-- TIER 1: DATA PLANE                                   -->
+  <!-- ════════════════════════════════════════════════════ -->
+
+  <!-- Client Apps -->
+  <div class="nd" style="left:65px;top:195px;">
+    <div class="ic">
+      <svg viewBox="0 0 80 80">
+        <rect x="8" y="8" width="64" height="44" rx="4" fill="#50b0f0" stroke="#0078d4" stroke-width="2"/>
+        <rect x="14" y="14" width="52" height="26" rx="2" fill="#fff"/>
+        <rect x="30" y="52" width="20" height="4" rx="1" fill="#0078d4"/>
+        <rect x="24" y="56" width="32" height="3" rx="1" fill="#999"/>
+        <line x1="20" y1="22" x2="58" y2="22" stroke="#0078d4" stroke-width="2"/>
+        <line x1="20" y1="29" x2="48" y2="29" stroke="#ddd" stroke-width="1.5"/>
+        <line x1="20" y1="34" x2="52" y2="34" stroke="#ddd" stroke-width="1.5"/>
+      </svg>
+    </div>
+    <span class="lb">Client Apps</span>
+    <span class="sl">Financial analysts</span>
+  </div>
+
+  <!-- App Gateway -->
+  <div class="nd" style="left:235px;top:195px;">
+    <div class="ic">
+      <svg viewBox="0 0 80 80">
+        <polygon points="40,6 74,24 74,56 40,74 6,56 6,24" fill="#0078d4"/>
+        <polygon points="40,16 62,28 62,48 40,60 18,48 18,28" fill="#fff"/>
+        <polygon points="40,24 52,32 52,44 40,52 28,44 28,32" fill="#0078d4" opacity="0.25"/>
+        <circle cx="40" cy="40" r="7" fill="#0078d4"/>
+        <path d="M37 40 L43 40 M40 37 L40 43" stroke="#fff" stroke-width="2"/>
+      </svg>
+    </div>
+    <span class="lb">Azure Application<br>Gateway</span>
+  </div>
+  <div class="al" style="left:163px;top:225px;">HTTPS</div>
+  <div class="al" style="left:348px;top:225px;">TLS</div>
+
+  <!-- ═══ AKS CLUSTER ═══ -->
+  <div class="ns" style="left:395px;top:80px;width:530px;height:395px;border:2.5px dashed #0078d4;background:rgba(0,120,212,0.02);">
+    <span class="nt" style="font-size:14px;color:#0078d4;">Azure Kubernetes Service (AKS)</span>
+    <span class="nsub">Virtual Network</span>
+  </div>
+
+  <!-- Front-end namespace -->
+  <div class="ns" style="left:415px;top:115px;width:140px;height:145px;border:1.5px solid #c8c8c8;background:#fff;">
+    <span class="nt" style="font-size:11px;">Front end</span>
+    <span class="nsub">Namespace</span>
+  </div>
+
+  <!-- Streamlit -->
+  <div class="nd" style="left:445px;top:140px;">
+    <div class="ic">
+      <svg viewBox="0 0 80 80">
+        <circle cx="40" cy="40" r="28" fill="#ff4b4b"/>
+        <path d="M28 32 L40 40 L52 32" stroke="#fff" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M28 44 L40 52 L52 44" stroke="#fff" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.6"/>
+      </svg>
+    </div>
+    <span class="lb">Streamlit UI</span>
+    <span class="sl">Ingress controller</span>
+  </div>
+
+  <!-- Back-end services namespace -->
+  <div class="ns" style="left:580px;top:115px;width:320px;height:145px;border:1.5px solid #c8c8c8;background:#fff;">
+    <span class="nt" style="font-size:11px;">Back-end services</span>
+    <span class="nsub">Namespace</span>
+  </div>
+
+  <!-- Agent Service Pods -->
+  <div class="nd" style="left:610px;top:135px;">
+    <div class="ic">
+      <svg viewBox="0 0 80 80">
+        <polygon points="40,8 72,24 72,56 40,72 8,56 8,24" fill="#0078d4"/>
+        <polygon points="40,8 72,24 40,40 8,24" fill="#50b0f0"/>
+        <polygon points="40,40 72,24 72,56 40,72" fill="#003f72"/>
+        <polygon points="40,40 8,24 8,56 40,72" fill="#0078d4"/>
+      </svg>
+    </div>
+    <span class="lb">Agent Pods</span>
+    <span class="sl">Orchestrator · Router<br>Synthesiser · Verifier</span>
+  </div>
+
+  <!-- Retrieval & Extraction Pods -->
+  <div class="nd" style="left:780px;top:135px;">
+    <div class="ic">
+      <svg viewBox="0 0 80 80">
+        <polygon points="40,8 72,24 72,56 40,72 8,56 8,24" fill="#008272"/>
+        <polygon points="40,8 72,24 40,40 8,24" fill="#00b7c3"/>
+        <polygon points="40,40 72,24 72,56 40,72" fill="#005e54"/>
+        <polygon points="40,40 8,24 8,56 40,72" fill="#008272"/>
+      </svg>
+    </div>
+    <span class="lb">Retrieval Pods</span>
+    <span class="sl">Retriever · Extractor<br>Transformer</span>
+  </div>
+
+  <!-- Utility services namespace -->
+  <div class="ns" style="left:415px;top:285px;width:485px;height:170px;border:1.5px solid #c8c8c8;background:#fff;">
+    <span class="nt" style="font-size:11px;">Utility services</span>
+    <span class="nsub">Namespace</span>
+  </div>
+
+  <!-- Ingestion Workers -->
+  <div class="nd" style="left:450px;top:310px;">
+    <div class="ic">
+      <svg viewBox="0 0 80 80">
+        <polygon points="40,8 72,24 72,56 40,72 8,56 8,24" fill="#d83b01"/>
+        <polygon points="40,8 72,24 40,40 8,24" fill="#ff8c4c"/>
+        <polygon points="40,40 72,24 72,56 40,72" fill="#a02c00"/>
+        <polygon points="40,40 8,24 8,56 40,72" fill="#d83b01"/>
+      </svg>
+    </div>
+    <span class="lb">Ingestion Workers</span>
+    <span class="sl">PDF parsing · Embedding<br>Late chunking</span>
+  </div>
+
+  <!-- Redis Cache -->
+  <div class="nd" style="left:650px;top:310px;">
+    <div class="ic">
+      <svg viewBox="0 0 80 80">
+        <polygon points="40,8 72,24 72,56 40,72 8,56 8,24" fill="#c6302b"/>
+        <polygon points="40,8 72,24 40,40 8,24" fill="#e84d3a"/>
+        <polygon points="40,40 72,24 72,56 40,72" fill="#9b1d1d"/>
+        <polygon points="40,40 8,24 8,56 40,72" fill="#c6302b"/>
+        <text x="40" y="44" text-anchor="middle" font-size="9" font-weight="bold" fill="#fff">REDIS</text>
+      </svg>
+    </div>
+    <span class="lb">Azure Cache<br>for Redis</span>
+    <span class="sl">Session · working memory</span>
+  </div>
+
+  <!-- Pod autoscaler -->
+  <div class="nd" style="left:810px;top:320px;">
+    <div class="ic" style="width:50px;height:50px;">
+      <svg viewBox="0 0 64 64" style="width:42px;height:42px;">
+        <circle cx="32" cy="32" r="24" fill="none" stroke="#0078d4" stroke-width="2" stroke-dasharray="5 3"/>
+        <path d="M22 38 L32 18 L42 38" fill="none" stroke="#0078d4" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="24" y1="34" x2="40" y2="34" stroke="#0078d4" stroke-width="2"/>
+      </svg>
+    </div>
+    <span class="lb" style="font-size:10px;">HPA / Autoscaler</span>
+  </div>
+
+  <!-- ═══ EXTERNAL MANAGED SERVICES (right column) ═══ -->
+  <div class="sh" style="left:1230px;top:80px;">External services</div>
+
+  <!-- Azure Database for PostgreSQL -->
+  <div class="nd" style="left:1230px;top:110px;">
+    <div class="ic">
+      <svg viewBox="0 0 80 80">
+        <rect x="12" y="16" width="56" height="48" rx="3" fill="#336791"/>
+        <ellipse cx="40" cy="16" rx="28" ry="9" fill="#4a90d9"/>
+        <ellipse cx="40" cy="64" rx="28" ry="9" fill="#336791" stroke="#254a6e" stroke-width="1"/>
+        <line x1="12" y1="16" x2="12" y2="64" stroke="#254a6e" stroke-width="1"/>
+        <line x1="68" y1="16" x2="68" y2="64" stroke="#254a6e" stroke-width="1"/>
+        <text x="40" y="44" text-anchor="middle" font-size="10" font-weight="bold" fill="#fff">pgvector</text>
+      </svg>
+    </div>
+    <span class="lb">Azure Database<br>for PostgreSQL</span>
+    <span class="sl">Flexible Server + pgvector<br>HNSW index</span>
+  </div>
+
+  <!-- Azure OpenAI Service -->
+  <div class="nd" style="left:1230px;top:210px;">
+    <div class="ic">
+      <svg viewBox="0 0 80 80">
+        <circle cx="40" cy="40" r="28" fill="none" stroke="#10a37f" stroke-width="2"/>
+        <circle cx="40" cy="40" r="18" fill="none" stroke="#10a37f" stroke-width="1.5"/>
+        <ellipse cx="40" cy="40" rx="28" ry="12" fill="none" stroke="#10a37f" stroke-width="2" transform="rotate(30 40 40)"/>
+        <ellipse cx="40" cy="40" rx="28" ry="12" fill="none" stroke="#10a37f" stroke-width="2" transform="rotate(-30 40 40)"/>
+        <circle cx="40" cy="40" r="7" fill="#10a37f"/>
+      </svg>
+    </div>
+    <span class="lb">Azure OpenAI<br>Service</span>
+    <span class="sl">GPT-4o · GPT-4o-mini</span>
+  </div>
+
+  <!-- Azure Blob Storage -->
+  <div class="nd" style="left:1230px;top:305px;">
+    <div class="ic">
+      <svg viewBox="0 0 80 80">
+        <rect x="10" y="18" width="60" height="44" rx="5" fill="#0078d4"/>
+        <rect x="17" y="25" width="14" height="11" rx="2" fill="#fff" opacity="0.9"/>
+        <rect x="35" y="25" width="14" height="11" rx="2" fill="#fff" opacity="0.7"/>
+        <rect x="53" y="25" width="14" height="11" rx="2" fill="#fff" opacity="0.5"/>
+        <rect x="17" y="42" width="14" height="11" rx="2" fill="#fff" opacity="0.6"/>
+        <rect x="35" y="42" width="14" height="11" rx="2" fill="#fff" opacity="0.4"/>
+        <rect x="53" y="42" width="14" height="11" rx="2" fill="#fff" opacity="0.3"/>
+      </svg>
+    </div>
+    <span class="lb">Azure Blob<br>Storage</span>
+    <span class="sl">PDF documents</span>
+  </div>
+
+  <!-- Azure Document Intelligence -->
+  <div class="nd" style="left:1230px;top:395px;">
+    <div class="ic">
+      <svg viewBox="0 0 80 80">
+        <rect x="10" y="10" width="60" height="60" rx="6" fill="#0078d4"/>
+        <rect x="18" y="18" width="18" height="13" rx="2" fill="#fff" opacity="0.9"/>
+        <rect x="40" y="18" width="18" height="13" rx="2" fill="#fff" opacity="0.7"/>
+        <line x1="18" y1="38" x2="58" y2="38" stroke="#fff" stroke-width="2" opacity="0.6"/>
+        <line x1="18" y1="46" x2="48" y2="46" stroke="#fff" stroke-width="2" opacity="0.4"/>
+        <line x1="18" y1="54" x2="52" y2="54" stroke="#fff" stroke-width="2" opacity="0.3"/>
+        <circle cx="60" cy="60" r="9" fill="#ffb900"/>
+        <text x="60" y="64" text-anchor="middle" font-size="8" font-weight="bold" fill="#fff">AI</text>
+      </svg>
+    </div>
+    <span class="lb">Azure Document<br>Intelligence</span>
+    <span class="sl">OCR · Table extraction</span>
+  </div>
+
+  <!-- Arrow labels for external services -->
+  <div class="al" style="left:960px;top:145px;color:#336791;">Chunks & vectors</div>
+  <div class="al" style="left:960px;top:215px;color:#10a37f;">LLM API calls</div>
+  <div class="al" style="left:960px;top:325px;color:#0078d4;">PDF read / write</div>
+  <div class="al" style="left:960px;top:395px;color:#0078d4;">OCR requests</div>
+
+  <!-- ════════════════════════════════════════════════════ -->
+  <!-- TIER 2: STREAMING — Confluent Kafka                  -->
+  <!-- ════════════════════════════════════════════════════ -->
+
+  <!-- Confluent Kafka -->
+  <div class="nd" style="left:580px;top:520px;">
+    <div class="ic" style="width:78px;height:78px;">
+      <svg viewBox="0 0 90 90" style="width:70px;height:70px;">
+        <!-- Confluent brand background -->
+        <rect x="5" y="5" width="80" height="80" rx="10" fill="#1a1a2e"/>
+        <!-- Confluent "stream" logo mark -->
+        <circle cx="45" cy="35" r="6" fill="none" stroke="#fff" stroke-width="2.5"/>
+        <circle cx="33" cy="50" r="5" fill="none" stroke="#fff" stroke-width="2"/>
+        <circle cx="57" cy="50" r="5" fill="none" stroke="#fff" stroke-width="2"/>
+        <circle cx="38" cy="65" r="4.5" fill="none" stroke="#fff" stroke-width="2" opacity="0.7"/>
+        <circle cx="52" cy="65" r="4.5" fill="none" stroke="#fff" stroke-width="2" opacity="0.7"/>
+        <line x1="41" y1="40" x2="36" y2="46" stroke="#fff" stroke-width="1.5"/>
+        <line x1="49" y1="40" x2="54" y2="46" stroke="#fff" stroke-width="1.5"/>
+        <line x1="36" y1="55" x2="40" y2="61" stroke="#fff" stroke-width="1.5" opacity="0.7"/>
+        <line x1="54" y1="55" x2="50" y2="61" stroke="#fff" stroke-width="1.5" opacity="0.7"/>
+        <!-- "CONFLUENT" text -->
+        <text x="45" y="18" text-anchor="middle" font-size="7.5" font-weight="700" fill="#fff" letter-spacing="1.5">CONFLUENT</text>
+      </svg>
+    </div>
+    <span class="lb">Confluent Cloud<br>for Apache Kafka</span>
+    <span class="sl">Event streaming · Audit trail<br>Message bus</span>
+  </div>
+
+  <!-- Kafka arrow labels -->
+  <div class="al" style="left:612px;top:498px;">Produce</div>
+  <div class="al" style="left:688px;top:498px;">Consume</div>
+
+  <!-- ════════════════════════════════════════════════════ -->
+  <!-- TIER 3: CI/CD PIPELINE                               -->
+  <!-- ════════════════════════════════════════════════════ -->
+  <div class="sh" style="left:60px;top:660px;">CI / CD Pipeline</div>
+
+  <!-- Dev/Ops -->
+  <div class="nd" style="left:65px;top:690px;">
+    <div class="ic">
+      <svg viewBox="0 0 80 80">
+        <circle cx="40" cy="24" r="14" fill="#00b7c3"/>
+        <circle cx="40" cy="21" r="9" fill="#e0f7fa"/>
+        <ellipse cx="40" cy="62" rx="24" ry="13" fill="#00b7c3"/>
+      </svg>
+    </div>
+    <span class="lb">Dev / Ops</span>
+  </div>
+
+  <!-- Azure Pipelines -->
+  <div class="nd" style="left:275px;top:685px;">
+    <div class="ic">
+      <svg viewBox="0 0 80 80">
+        <rect x="8" y="8" width="64" height="64" rx="6" fill="#0078d4"/>
+        <circle cx="28" cy="30" r="9" fill="#fff" opacity="0.9"/>
+        <circle cx="52" cy="30" r="7" fill="#fff" opacity="0.7"/>
+        <circle cx="28" cy="52" r="7" fill="#fff" opacity="0.6"/>
+        <circle cx="52" cy="52" r="9" fill="#fff" opacity="0.8"/>
+        <line x1="36" y1="30" x2="44" y2="30" stroke="#0078d4" stroke-width="2"/>
+        <line x1="28" y1="38" x2="28" y2="44" stroke="#0078d4" stroke-width="2"/>
+        <line x1="36" y1="44" x2="44" y2="48" stroke="#0078d4" stroke-width="1.5"/>
+      </svg>
+    </div>
+    <span class="lb">Azure Pipelines</span>
+    <span class="sl">Build · Test · Deploy</span>
+  </div>
+
+  <!-- Azure Container Registry -->
+  <div class="nd" style="left:485px;top:685px;">
+    <div class="ic">
+      <svg viewBox="0 0 80 80">
+        <rect x="8" y="14" width="64" height="50" rx="5" fill="#0078d4"/>
+        <rect x="14" y="20" width="14" height="14" rx="1" fill="#fff" opacity="0.9"/>
+        <rect x="33" y="20" width="14" height="14" rx="1" fill="#fff" opacity="0.8"/>
+        <rect x="52" y="20" width="14" height="14" rx="1" fill="#fff" opacity="0.7"/>
+        <rect x="14" y="40" width="14" height="14" rx="1" fill="#fff" opacity="0.6"/>
+        <rect x="33" y="40" width="14" height="14" rx="1" fill="#fff" opacity="0.5"/>
+        <rect x="52" y="40" width="14" height="14" rx="1" fill="#fff" opacity="0.4"/>
+      </svg>
+    </div>
+    <span class="lb">Azure Container<br>Registry</span>
+  </div>
+
+  <!-- CI/CD arrow labels -->
+  <div class="al" style="left:170px;top:715px;">git push</div>
+  <div class="al" style="left:388px;top:715px;color:#d83b01;">Docker push</div>
+  <div class="al" style="left:548px;top:570px;color:#d83b01;transform:rotate(-90deg);">Deploy images</div>
+
+  <!-- ════════════════════════════════════════════════════ -->
+  <!-- TIER 4: PLATFORM SERVICES                            -->
+  <!-- ════════════════════════════════════════════════════ -->
+  <div class="sh" style="left:60px;top:840px;">Platform Services</div>
+
+  <!-- Entra ID -->
+  <div class="nd" style="left:270px;top:870px;">
+    <div class="ic">
+      <svg viewBox="0 0 80 80">
+        <polygon points="40,6 72,22 72,58 40,74 8,58 8,22" fill="#0078d4"/>
+        <polygon points="40,18 58,28 58,48 40,58 22,48 22,28" fill="#50b0f0"/>
+        <polygon points="40,28 48,33 48,43 40,48 32,43 32,33" fill="#fff"/>
+      </svg>
+    </div>
+    <span class="lb">Microsoft Entra ID</span>
+    <span class="sl">Identity · RBAC</span>
+  </div>
+
+  <!-- Azure Monitor -->
+  <div class="nd" style="left:710px;top:870px;">
+    <div class="ic">
+      <svg viewBox="0 0 80 80">
+        <circle cx="40" cy="40" r="28" fill="#fff" stroke="#0078d4" stroke-width="2.5"/>
+        <path d="M18 52 L28 36 L38 48 L50 22 L62 42" stroke="#0078d4" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="50" cy="22" r="3.5" fill="#0078d4"/>
+      </svg>
+    </div>
+    <span class="lb">Azure Monitor</span>
+    <span class="sl">Application Insights<br>OpenTelemetry</span>
+  </div>
+
+  <!-- Key Vault -->
+  <div class="nd" style="left:990px;top:870px;">
+    <div class="ic">
+      <svg viewBox="0 0 80 80">
+        <circle cx="40" cy="26" r="18" fill="#ffb900"/>
+        <rect x="37" y="42" width="7" height="26" rx="2" fill="#ffb900"/>
+        <rect x="33" y="52" width="14" height="5" rx="1" fill="#c89200"/>
+        <circle cx="40" cy="26" r="9" fill="#fff"/>
+        <circle cx="40" cy="26" r="4.5" fill="#ffb900"/>
+      </svg>
+    </div>
+    <span class="lb">Azure Key Vault</span>
+    <span class="sl">API keys · DB credentials<br>TLS certificates</span>
+  </div>
+
+  <!-- Platform arrow labels -->
+  <div class="al" style="left:382px;top:830px;color:#999;">RBAC</div>
+  <div class="al" style="left:765px;top:830px;color:#999;">Telemetry</div>
+  <div class="al" style="left:910px;top:830px;color:#999;">Secrets</div>
+
+</div>
+</body>
+</html>

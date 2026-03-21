@@ -71,3 +71,35 @@ class ModernBERTEmbedder:
         masked = embeddings * mask
         pooled = masked.sum(dim=0) / mask.sum()
         return pooled.cpu().numpy().astype("float32").tolist()
+
+    def embed_texts_batch(self, texts: List[str]) -> List[List[float]]:
+        """Embed multiple texts in a single padded forward pass for throughput.
+
+        Tokenizes all texts, pads to the longest sequence, runs one forward
+        pass, then mean-pools each sequence individually.
+        """
+        if not texts:
+            return []
+        if len(texts) == 1:
+            return [self.embed_text(texts[0])]
+
+        import numpy as np
+
+        encodings = self.tokenizer(
+            texts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=self.max_length,
+        ).to(self.device)
+
+        with torch.no_grad():
+            output = self.model(
+                input_ids=encodings["input_ids"],
+                attention_mask=encodings["attention_mask"],
+            )
+        hidden = output.last_hidden_state  # (batch, seq, dim)
+        mask = encodings["attention_mask"].unsqueeze(-1)  # (batch, seq, 1)
+        masked = hidden * mask
+        pooled = masked.sum(dim=1) / mask.sum(dim=1)  # (batch, dim)
+        return pooled.cpu().numpy().astype(np.float32).tolist()

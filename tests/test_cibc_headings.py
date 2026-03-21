@@ -6,6 +6,7 @@ from ingestion.ingest_pipeline import ingest_and_chunk
 from storage.db import get_connection
 
 
+@pytest.mark.external
 @pytest.mark.skipif(
     not os.getenv("CIBC_PDF_PATH"),
     reason="CIBC_PDF_PATH not set; skipping heavy ingest test.",

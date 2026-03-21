@@ -12,7 +12,7 @@ def test_no_direct_psycopg2_connect_outside_pool():
         "retrieval/hybrid.py",
         "retrieval/metadata.py",
         "ingestion/ingest_pipeline.py",
-        "app/poc_app.py",
+        "app/app.py",
     ]
     violations = []
     for path in check_paths:

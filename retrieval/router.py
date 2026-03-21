@@ -6,6 +6,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from core.contracts import RetrievedChunk
 from core.config import settings
+from core.enums import IntentType, CoverageType, ChunkType, SourceType
 from retrieval import vector_search
 from retrieval.hybrid import (
     bm25_heading_anchor,
@@ -167,21 +168,21 @@ class RetrievalPlan:
 def classify_query(query: str) -> QueryIntent:
     pages = _extract_pages(query)
     if pages:
-        return QueryIntent(intent="location", pages=pages)
+        return QueryIntent(intent=IntentType.LOCATION, pages=pages)
     if any(pattern.search(query) for pattern in POINTER_TERMS):
         return QueryIntent(
-            intent="coverage", pages=[], coverage_type="pointer"
+            intent=IntentType.COVERAGE, pages=[], coverage_type=CoverageType.POINTER
         )
     if any(pattern.search(query) for pattern in CLOSED_PATTERNS):
         return QueryIntent(
-            intent="coverage", pages=[], coverage_type="list", status_filter="closed"
+            intent=IntentType.COVERAGE, pages=[], coverage_type=CoverageType.LIST, status_filter="closed"
         )
     if any(pattern.search(query) for pattern in COVERAGE_PATTERNS) or any(
         pattern.search(query) for pattern in ATTRIBUTE_TERMS
     ):
         coverage_type = _classify_coverage_type(query)
-        return QueryIntent(intent="coverage", pages=[], coverage_type=coverage_type)
-    return QueryIntent(intent="semantic", pages=[])
+        return QueryIntent(intent=IntentType.COVERAGE, pages=[], coverage_type=coverage_type)
+    return QueryIntent(intent=IntentType.SEMANTIC, pages=[])
 
 
 def search_with_intent(
@@ -238,55 +239,57 @@ def _build_plan(
     debug: Dict[str, object],
     top_k: int,
 ) -> RetrievalPlan:
-    if intent.intent == "location":
-        def _locate() -> List[RetrievedChunk]:
-            return vector_search.search_on_pages(
-                doc_id, query, intent.pages, top_k=100
-            )
+    builder = _PLAN_BUILDERS.get(intent.intent, _build_semantic_plan)
+    return builder(doc_id, query, intent, debug, top_k)
 
-        def _expand(chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:
-            return chunks
 
-        def _select(chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:
-            if settings.enable_reranker:
-                from retrieval.rerank import rerank
+def _build_location_plan(
+    doc_id: str, query: str, intent: QueryIntent, debug: Dict[str, object], top_k: int,
+) -> RetrievalPlan:
+    def locate() -> List[RetrievedChunk]:
+        return vector_search.search_on_pages(doc_id, query, intent.pages, top_k=100)
 
-                return rerank(query, chunks)
-            return chunks
+    def expand(chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:
+        return chunks
 
-        return RetrievalPlan("location", _locate, _expand, _select)
+    def select(chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:
+        return _rerank_if_enabled(query, chunks)
 
-    if intent.intent == "coverage":
-        def _locate() -> List[RetrievedChunk]:
-            return _locate_coverage_anchor(doc_id, query, intent, debug)
+    return RetrievalPlan(IntentType.LOCATION, locate, expand, select)
 
-        def _expand(anchors: List[RetrievedChunk]) -> List[RetrievedChunk]:
-            if not anchors:
-                if intent.coverage_type == "list":
-                    raise RuntimeError("CoverageListQuery has no anchor heading.")
-                return []
-            debug["anchor"] = _format_anchor(anchors[0])
-            candidates, expansion = _expand_from_anchor(
-                doc_id,
-                anchors[0],
-                allow_page_window=_allow_page_window(intent.coverage_type),
-            )
-            debug["expansion"] = expansion
-            if intent.coverage_type in {"list", "numeric_list"} and not candidates:
-                raise RuntimeError("CoverageListQuery expansion returned no chunks.")
-            return candidates
 
-        def _select(chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:
-            filtered = _apply_table_filter(query, chunks)
-            if settings.enable_reranker:
-                from retrieval.rerank import rerank
+def _build_coverage_plan(
+    doc_id: str, query: str, intent: QueryIntent, debug: Dict[str, object], top_k: int,
+) -> RetrievalPlan:
+    def locate() -> List[RetrievedChunk]:
+        return _locate_coverage_anchor(doc_id, query, intent, debug)
 
-                return rerank(query, filtered)
-            return filtered
+    def expand(anchors: List[RetrievedChunk]) -> List[RetrievedChunk]:
+        if not anchors:
+            if intent.coverage_type == CoverageType.LIST:
+                raise RuntimeError("CoverageListQuery has no anchor heading.")
+            return []
+        debug["anchor"] = _format_anchor(anchors[0])
+        candidates, expansion = _expand_from_anchor(
+            doc_id, anchors[0],
+            allow_page_window=_allow_page_window(intent.coverage_type),
+        )
+        debug["expansion"] = expansion
+        if intent.coverage_type in {CoverageType.LIST, CoverageType.NUMERIC_LIST} and not candidates:
+            raise RuntimeError("CoverageListQuery expansion returned no chunks.")
+        return candidates
 
-        return RetrievalPlan("coverage", _locate, _expand, _select)
+    def select(chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:
+        filtered = _apply_table_filter(query, chunks)
+        return _rerank_if_enabled(query, filtered)
 
-    def _locate() -> List[RetrievedChunk]:
+    return RetrievalPlan(IntentType.COVERAGE, locate, expand, select)
+
+
+def _build_semantic_plan(
+    doc_id: str, query: str, intent: QueryIntent, debug: Dict[str, object], top_k: int,
+) -> RetrievalPlan:
+    def locate() -> List[RetrievedChunk]:
         target = _match_section_target(query)
         if target:
             anchors = _locate_section_anchor(doc_id, query, target, debug)
@@ -299,18 +302,31 @@ def _build_plan(
             return hybrid_search(doc_id, query, top_k=100)
         return vector_search.search(doc_id, query, top_k=100)
 
-    def _expand(chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:
+    def expand(chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:
         return chunks
 
-    def _select(chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:
+    def select(chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:
         filtered = _apply_table_filter(query, chunks)
-        if settings.enable_reranker:
-            from retrieval.rerank import rerank
-
-            filtered = rerank(query, filtered)
+        filtered = _rerank_if_enabled(query, filtered)
         return filtered[:top_k]
 
-    return RetrievalPlan("semantic", _locate, _expand, _select)
+    return RetrievalPlan(IntentType.SEMANTIC, locate, expand, select)
+
+
+def _rerank_if_enabled(query: str, chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:
+    """Apply cross-encoder reranking when the feature flag is on."""
+    if settings.enable_reranker:
+        from retrieval.rerank import rerank
+        return rerank(query, chunks)
+    return chunks
+
+
+# Intent → plan builder dispatch table (Open/Closed Principle)
+_PLAN_BUILDERS: Dict[str, Callable] = {
+    IntentType.LOCATION: _build_location_plan,
+    IntentType.COVERAGE: _build_coverage_plan,
+    IntentType.SEMANTIC: _build_semantic_plan,
+}
 
 
 def _expand_coverage_query(query: str) -> str:
@@ -324,23 +340,23 @@ def _expand_coverage_query(query: str) -> str:
 
 
 def _allow_page_window(coverage_type: Optional[str]) -> bool:
-    return coverage_type == "attribute"
+    return coverage_type == CoverageType.ATTRIBUTE
 
 
 def _classify_coverage_type(query: str) -> str:
     if any(pattern.search(query) for pattern in POINTER_TERMS):
-        return "pointer"
+        return CoverageType.POINTER
     if re.search(r"\bitems of note\b", query, re.IGNORECASE) and re.search(
         r"\bnet income\b|\baggregate impact\b|\baggregate\b", query, re.IGNORECASE
     ):
-        return "numeric_list"
+        return CoverageType.NUMERIC_LIST
     has_list = any(pattern.search(query) for pattern in LIST_TERMS)
     has_attribute = any(pattern.search(query) for pattern in ATTRIBUTE_TERMS)
     if has_list:
-        return "list"
+        return CoverageType.LIST
     if has_attribute:
-        return "attribute"
-    return "list"
+        return CoverageType.ATTRIBUTE
+    return CoverageType.LIST
 
 
 def _expand_from_anchor(
@@ -432,7 +448,7 @@ def _apply_table_filter(query: str, chunks: List[RetrievedChunk]) -> List[Retrie
         return [
             chunk
             for chunk in chunks
-            if chunk.chunk_type != "table"
+            if chunk.chunk_type != ChunkType.TABLE
             and not chunk.text_content.lstrip().startswith("[TABLE]")
         ]
     return chunks
@@ -513,11 +529,55 @@ def _litigation_anchor_phrases() -> List[str]:
     ]
 
 
+def _collect_anchor_rejection_reasons(
+    candidate: RetrievedChunk,
+    combined_text_lower: str,
+    impact_hits: int,
+    is_numeric_list: bool,
+    explicit_note: bool,
+) -> List[str]:
+    """Collect all reasons to reject a candidate anchor chunk.
+
+    Returns an empty list if the candidate should be accepted.
+    """
+    reasons: List[str] = []
+
+    # Items of note (MD&A) ≠ Note 12 (financial statements)
+    is_table_text = candidate.text_content.lstrip().startswith("[TABLE]")
+    if candidate.chunk_type not in {ChunkType.NARRATIVE, ChunkType.HEADING} or is_table_text:
+        reasons.append("reject_chunk_type")
+
+    if not _contains_any_phrase(combined_text_lower, ITEMS_OF_NOTE_PHRASES):
+        reasons.append("missing_positive_phrase")
+
+    if is_numeric_list:
+        if _is_front_matter_reference(combined_text_lower):
+            reasons.append("front_matter_reference")
+        if _is_adjusted_measures_definition(combined_text_lower):
+            reasons.append("reject_adjusted_measures_definition")
+        if not _has_items_of_note_reconciliation_signal(combined_text_lower):
+            reasons.append("missing_reconciliation_signal")
+        if _is_reconciliation_reference_only(combined_text_lower, candidate.text_content):
+            reasons.append("reject_reconciliation_reference_only")
+        if impact_hits < 2 and not _has_aggregate_impact_phrase(combined_text_lower):
+            reasons.append("missing_itemization_or_aggregate")
+
+    if not explicit_note:
+        if any(neg.lower() in combined_text_lower for neg in ITEMS_OF_NOTE_NEGATIVE):
+            reasons.append("negative_phrase")
+        if re.search(r"\bnote\s+\d+\b", combined_text_lower) and not re.search(
+            r"\bitems of note\s+\d+\b", combined_text_lower
+        ):
+            reasons.append("negative_note_reference")
+
+    return reasons
+
+
 def _select_items_of_note_anchor(
     doc_id: str, query: str, decisions: List[Dict[str, object]]
 ) -> List[RetrievedChunk]:
     method = _anchor_method_label()
-    numeric_list = _classify_coverage_type(query) == "numeric_list"
+    is_numeric_list = _classify_coverage_type(query) == CoverageType.NUMERIC_LIST
     if settings.enable_hybrid_retrieval:
         candidates = bm25_heading_anchor_candidates(
             doc_id, ITEMS_OF_NOTE_PHRASES, top_k=25
@@ -527,63 +587,29 @@ def _select_items_of_note_anchor(
             doc_id, ITEMS_OF_NOTE_PHRASES, top_k=25
         )
     explicit_note = _explicit_note_request(query)
+
     for candidate in candidates:
-        reasons = []
-        # Items of note (MD&A) ≠ Note 12 (financial statements) — avoid table/note anchors.
-        is_table_text = candidate.text_content.lstrip().startswith("[TABLE]")
-        if candidate.chunk_type not in {"narrative", "heading"} or is_table_text:
-            reasons.append("reject_chunk_type")
-        text = f"{candidate.heading_path} {candidate.section_id} {candidate.text_content}"
-        lower = text.lower()
+        combined_text = f"{candidate.heading_path} {candidate.section_id} {candidate.text_content}"
+        combined_text_lower = combined_text.lower()
         impact_hits = _count_financial_impact_mentions(candidate.text_content)
-        if not _contains_any_phrase(lower, ITEMS_OF_NOTE_PHRASES):
-            reasons.append("missing_positive_phrase")
-        if numeric_list:
-            if _is_front_matter_reference(lower):
-                reasons.append("front_matter_reference")
-            if _is_adjusted_measures_definition(lower):
-                # Adjusted measures (ratio definitions) ≠ Items of note (MD&A reconciliation) — reject as anchor.
-                reasons.append("reject_adjusted_measures_definition")
-            if not _has_items_of_note_reconciliation_signal(lower):
-                reasons.append("missing_reconciliation_signal")
-            if _is_reconciliation_reference_only(lower, candidate.text_content):
-                # Reconciliation reference ≠ reconciliation disclosure — reject meta anchors.
-                reasons.append("reject_reconciliation_reference_only")
-            if not (
-                impact_hits >= 2
-                or _has_aggregate_impact_phrase(lower)
-            ):
-                reasons.append("missing_itemization_or_aggregate")
-        if not explicit_note:
-            if any(neg.lower() in lower for neg in ITEMS_OF_NOTE_NEGATIVE):
-                reasons.append("negative_phrase")
-            if re.search(r"\bnote\s+\d+\b", lower) and not re.search(
-                r"\bitems of note\s+\d+\b", lower
-            ):
-                reasons.append("negative_note_reference")
-        if reasons:
-            decisions.append(
-                {
-                    "chunk_id": candidate.chunk_id,
-                    "chunk_type": candidate.chunk_type,
-                    "anchor_method": method,
-                    "snippet": text[:120],
-                    "impact_number_hits": impact_hits,
-                    "reasons": reasons,
-                }
-            )
-            continue
-        decisions.append(
-            {
-                "chunk_id": candidate.chunk_id,
-                "chunk_type": candidate.chunk_type,
-                "anchor_method": method,
-                "snippet": text[:120],
-                "impact_number_hits": impact_hits,
-                "reasons": ["accepted"],
-            }
+
+        reasons = _collect_anchor_rejection_reasons(
+            candidate, combined_text_lower, impact_hits, is_numeric_list, explicit_note
         )
-        return [candidate]
+
+        decision_entry = {
+            "chunk_id": candidate.chunk_id,
+            "chunk_type": candidate.chunk_type,
+            "anchor_method": method,
+            "snippet": combined_text[:120],
+            "impact_number_hits": impact_hits,
+            "reasons": reasons or ["accepted"],
+        }
+        decisions.append(decision_entry)
+
+        if not reasons:
+            return [candidate]
+
     return []
 
 
@@ -616,14 +642,6 @@ def _is_front_matter_reference(text: str) -> bool:
             "cross-reference",
         )
     )
-
-
-def _has_enumerated_list(text: str) -> bool:
-    return bool(re.search(r"(^|[\n\s])([\-•]|\d+\)|\d+\.)\s", text))
-
-
-def _has_multiple_labeled_numbers(text: str) -> bool:
-    return _count_financial_impact_mentions(text) >= 2
 
 
 def _has_items_of_note_reconciliation_signal(text: str) -> bool:

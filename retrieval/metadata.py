@@ -2,6 +2,7 @@ from typing import Dict, List, Optional, Tuple
 
 from rank_bm25 import BM25Okapi
 
+from core.chunk_utils import filter_narrative_chunks, is_table_chunk, merge_page_lists
 from core.config import settings
 from core.contracts import DocumentFact, RetrievedChunk
 from retrieval import vector_search
@@ -54,7 +55,7 @@ def handle_metadata_query(
         return answer, [chunk], {"fact_name": fact_name, "status": fact.status}
     searched_pages = list(range(1, settings.front_matter_pages + 1))
     results = vector_search.search_on_pages(doc_id, query, searched_pages, top_k=3)
-    candidates = _filter_narrative(results)
+    candidates = filter_narrative_chunks(results)
     heading_hits = _heading_phrase_candidates(doc_id)
     candidates.extend(heading_hits)
     bm25_hits = _bm25_narrative_candidates(doc_id, CURRENCY_KEYWORDS, top_k=3)
@@ -64,7 +65,7 @@ def handle_metadata_query(
         value = _extract_fact_value(fact_name, candidates)
         if value:
             answer = f"{fact_name}: {value} [C1]"
-            searched = _merge_pages([searched_pages] + [c.page_numbers for c in candidates])
+            searched = merge_page_lists([searched_pages] + [c.page_numbers for c in candidates])
             return answer, [candidates[0]], {
                 "fact_name": fact_name,
                 "status": "found",
@@ -74,7 +75,7 @@ def handle_metadata_query(
     if fact and fact.status in {"not_found", "ambiguous"}:
         status = fact.status
     label = "ambiguous" if status == "ambiguous" else "not found"
-    searched = _merge_pages([searched_pages] + [c.page_numbers for c in candidates])
+    searched = merge_page_lists([searched_pages] + [c.page_numbers for c in candidates])
     answer = f"{fact_name} {label}. Searched pages: {searched}."
     return answer, [], {
         "fact_name": fact_name,
@@ -110,7 +111,7 @@ def _fact_to_chunk(fact: DocumentFact) -> RetrievedChunk:
 def _extract_fact_value(fact_name: str, chunks: List[RetrievedChunk]) -> Optional[str]:
     if fact_name == "default_currency":
         for chunk in chunks:
-            if chunk.chunk_type == "table" or chunk.text_content.lstrip().startswith("[TABLE]"):
+            if is_table_chunk(chunk):
                 continue
             text = chunk.text_content
             if "Canadian dollars" in text:
@@ -120,33 +121,24 @@ def _extract_fact_value(fact_name: str, chunks: List[RetrievedChunk]) -> Optiona
     return None
 
 
-def _filter_narrative(chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:
-    return [
-        chunk
-        for chunk in chunks
-        if chunk.chunk_type != "table"
-        and not chunk.text_content.lstrip().startswith("[TABLE]")
-    ]
-
-
 def _heading_phrase_candidates(doc_id: str) -> List[RetrievedChunk]:
     rows = []
+    sql = f"""
+        SELECT {vector_search._CHUNK_COLUMNS},
+               0.0 AS score
+        FROM chunks
+        WHERE doc_id = %s
+          AND chunk_type <> 'table'
+          AND text_content NOT LIKE '[TABLE]%%'
+          AND (heading_path ILIKE %s OR section_id ILIKE %s)
+        ORDER BY page_numbers[1] NULLS LAST, macro_id, child_id
+        LIMIT 1
+    """
     with get_connection() as conn:
         with conn.cursor() as cursor:
             for phrase in HEADING_PHRASES:
                 cursor.execute(
-                    """
-                    SELECT chunk_id, doc_id, page_numbers, macro_id, child_id, chunk_type,
-                           text_content, char_start, char_end, polygons, source_type,
-                           heading_path, section_id, 0.0 AS score
-                    FROM chunks
-                    WHERE doc_id = %s
-                      AND chunk_type <> 'table'
-                      AND text_content NOT LIKE '[TABLE]%%'
-                      AND (heading_path ILIKE %s OR section_id ILIKE %s)
-                    ORDER BY page_numbers[1] NULLS LAST, macro_id, child_id
-                    LIMIT 1
-                    """,
+                    sql,
                     (doc_id, f"%{phrase}%", f"%{phrase}%"),
                 )
                 row = cursor.fetchone()
@@ -170,20 +162,17 @@ def _bm25_narrative_candidates(
 
 
 def _fetch_narrative_rows(doc_id: str) -> List[Tuple]:
+    sql = f"""
+        SELECT {vector_search._CHUNK_COLUMNS},
+               0.0 AS score
+        FROM chunks
+        WHERE doc_id = %s
+          AND chunk_type <> 'table'
+          AND text_content NOT LIKE '[TABLE]%%'
+    """
     with get_connection() as conn:
         with conn.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT chunk_id, doc_id, page_numbers, macro_id, child_id, chunk_type,
-                       text_content, char_start, char_end, polygons, source_type,
-                       heading_path, section_id, 0.0 AS score
-                FROM chunks
-                WHERE doc_id = %s
-                  AND chunk_type <> 'table'
-                  AND text_content NOT LIKE '[TABLE]%%'
-                """,
-                (doc_id,),
-            )
+            cursor.execute(sql, (doc_id,))
             return cursor.fetchall()
 
 
@@ -198,6 +187,3 @@ def _dedupe_chunks(chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:
     return deduped
 
 
-def _merge_pages(page_lists: List[List[int]]) -> List[int]:
-    pages = sorted({page for pages in page_lists for page in pages})
-    return pages

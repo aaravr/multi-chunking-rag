@@ -1,0 +1,1036 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Enterprise Agentic IDP RAG — Azure Deployment Architecture</title>
+<style>
+  :root {
+    /* Azure Brand Colors */
+    --azure-blue: #0078D4;
+    --azure-dark: #003B73;
+    --azure-light: #50E6FF;
+    --azure-teal: #008272;
+    --azure-green: #107C10;
+    --azure-orange: #FF8C00;
+    --azure-red: #D13438;
+    --azure-purple: #8661C5;
+    --azure-gray: #505050;
+    --azure-bg: #F3F2F1;
+    --azure-card: #FFFFFF;
+    --azure-border: #EDEBE9;
+    --azure-text: #323130;
+    --azure-text-secondary: #605E5C;
+    --vnet-bg: rgba(0, 120, 212, 0.04);
+    --subnet-bg: rgba(0, 120, 212, 0.07);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--azure-bg);
+    color: var(--azure-text);
+    padding: 32px;
+    min-width: 1600px;
+  }
+
+  /* Header */
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 32px;
+    padding: 24px 32px;
+    background: linear-gradient(135deg, var(--azure-dark) 0%, var(--azure-blue) 100%);
+    border-radius: 8px;
+    color: white;
+  }
+  .header-logo {
+    width: 48px; height: 48px;
+    background: rgba(255,255,255,0.15);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 28px; font-weight: 700;
+  }
+  .header h1 { font-size: 24px; font-weight: 600; }
+  .header p { font-size: 13px; opacity: 0.85; margin-top: 2px; }
+  .header-badge {
+    margin-left: auto;
+    padding: 6px 16px;
+    background: rgba(255,255,255,0.15);
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+
+  /* Legend */
+  .legend {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 24px;
+    padding: 12px 24px;
+    background: white;
+    border-radius: 8px;
+    border: 1px solid var(--azure-border);
+    font-size: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .legend-title { font-weight: 600; color: var(--azure-gray); margin-right: 8px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-dot {
+    width: 12px; height: 12px; border-radius: 3px;
+  }
+  .legend-line {
+    width: 32px; height: 2px; border-radius: 1px;
+  }
+  .legend-line.dashed {
+    background: repeating-linear-gradient(90deg, var(--azure-blue), var(--azure-blue) 4px, transparent 4px, transparent 8px);
+  }
+
+  /* Main canvas */
+  .canvas {
+    position: relative;
+    background: white;
+    border-radius: 12px;
+    border: 1px solid var(--azure-border);
+    padding: 32px;
+    overflow: visible;
+  }
+
+  /* VNet container */
+  .vnet {
+    border: 2px dashed var(--azure-blue);
+    border-radius: 12px;
+    padding: 24px;
+    background: var(--vnet-bg);
+    position: relative;
+    margin-bottom: 24px;
+  }
+  .vnet-label {
+    position: absolute;
+    top: -12px;
+    left: 24px;
+    background: white;
+    padding: 2px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--azure-blue);
+    border: 1px solid var(--azure-blue);
+    border-radius: 4px;
+  }
+
+  /* Subnet container */
+  .subnet {
+    border: 1.5px solid #B4D6FA;
+    border-radius: 8px;
+    padding: 16px;
+    background: var(--subnet-bg);
+    position: relative;
+    margin-top: 16px;
+  }
+  .subnet-label {
+    position: absolute;
+    top: -10px;
+    left: 16px;
+    background: #E8F4FD;
+    padding: 1px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--azure-blue);
+    border-radius: 3px;
+    border: 1px solid #B4D6FA;
+  }
+  .subnet-cidr {
+    font-weight: 400;
+    color: var(--azure-text-secondary);
+    margin-left: 4px;
+    font-size: 10px;
+  }
+
+  /* Grid layouts */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
+  .grid-6 { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+
+  /* Resource card */
+  .resource {
+    background: var(--azure-card);
+    border: 1px solid var(--azure-border);
+    border-radius: 8px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    transition: box-shadow 0.2s, transform 0.15s;
+    position: relative;
+    min-height: 110px;
+    justify-content: center;
+  }
+  .resource:hover {
+    box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+    transform: translateY(-2px);
+  }
+
+  .resource-icon {
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    flex-shrink: 0;
+  }
+  .resource-icon svg { width: 32px; height: 32px; }
+
+  .resource-name {
+    font-size: 11.5px;
+    font-weight: 600;
+    text-align: center;
+    line-height: 1.3;
+    color: var(--azure-text);
+  }
+  .resource-detail {
+    font-size: 10px;
+    color: var(--azure-text-secondary);
+    text-align: center;
+    line-height: 1.2;
+  }
+  .resource-badge {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    font-size: 9px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-weight: 600;
+  }
+  .badge-keda {
+    background: #E8F5E9;
+    color: var(--azure-green);
+  }
+  .badge-managed {
+    background: #E3F2FD;
+    color: var(--azure-blue);
+  }
+  .badge-oss {
+    background: #FFF3E0;
+    color: var(--azure-orange);
+  }
+
+  /* Section headers */
+  .section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--azure-dark);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section-title::before {
+    content: '';
+    width: 4px;
+    height: 18px;
+    background: var(--azure-blue);
+    border-radius: 2px;
+  }
+
+  /* Flow arrows area */
+  .flow-section {
+    margin-top: 24px;
+    padding: 20px 24px;
+    background: #FAFAFA;
+    border-radius: 8px;
+    border: 1px solid var(--azure-border);
+  }
+  .flow-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+    font-size: 12px;
+  }
+  .flow-arrow {
+    color: var(--azure-blue);
+    font-weight: 700;
+    font-size: 16px;
+  }
+  .flow-label {
+    padding: 4px 10px;
+    background: white;
+    border: 1px solid var(--azure-border);
+    border-radius: 4px;
+    font-weight: 500;
+    min-width: 160px;
+    text-align: center;
+  }
+  .flow-desc {
+    color: var(--azure-text-secondary);
+    font-size: 11px;
+  }
+
+  /* External services row */
+  .external-row {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .external-group {
+    flex: 1;
+    background: white;
+    border-radius: 8px;
+    border: 1px solid var(--azure-border);
+    padding: 16px;
+  }
+  .external-group-title {
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 10px;
+    color: var(--azure-gray);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  /* Connection lines SVG overlay */
+  .connections-overlay {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  /* Divider */
+  .divider {
+    height: 1px;
+    background: var(--azure-border);
+    margin: 20px 0;
+  }
+
+  /* Footer */
+  .footer {
+    margin-top: 24px;
+    padding: 16px 24px;
+    background: white;
+    border-radius: 8px;
+    border: 1px solid var(--azure-border);
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--azure-text-secondary);
+  }
+
+  /* Tier labels */
+  .tier-label {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    margin-top: 2px;
+  }
+  .tier-1 { background: #FCE4EC; color: #C62828; }
+  .tier-2 { background: #FFF3E0; color: #E65100; }
+  .tier-local { background: #E8F5E9; color: #2E7D32; }
+
+  /* Responsive spacing */
+  .mt-16 { margin-top: 16px; }
+  .mt-20 { margin-top: 20px; }
+  .mb-12 { margin-bottom: 12px; }
+  .gap-row { display: flex; gap: 16px; }
+  .flex-1 { flex: 1; }
+</style>
+</head>
+<body>
+
+<!-- ===== HEADER ===== -->
+<div class="header">
+  <div class="header-logo">
+    <svg viewBox="0 0 32 32" width="32" height="32"><path d="M16 4L4 10v12l12 6 12-6V10L16 4z" fill="rgba(255,255,255,0.3)" stroke="white" stroke-width="1.5"/><path d="M16 4v18M4 10l12 12 12-12" fill="none" stroke="white" stroke-width="1.5"/></svg>
+  </div>
+  <div>
+    <h1>Enterprise Agentic IDP RAG Platform</h1>
+    <p>Azure Deployment Architecture — Multi-Chunking Intelligent Document Processing</p>
+  </div>
+  <div class="header-badge">PRODUCTION ARCHITECTURE</div>
+</div>
+
+<!-- ===== LEGEND ===== -->
+<div class="legend">
+  <span class="legend-title">Legend:</span>
+  <div class="legend-item"><div class="legend-dot" style="background:#0078D4"></div> Azure Managed Service</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#FF8C00"></div> OSS on AKS</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#107C10"></div> KEDA Auto-scaled</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#8661C5"></div> AI / LLM Service</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#D13438"></div> External / 3rd Party</div>
+  <div class="legend-item">
+    <div class="legend-line" style="background:var(--azure-blue)"></div> Data flow
+  </div>
+  <div class="legend-item">
+    <div class="legend-line dashed"></div> VNet boundary
+  </div>
+</div>
+
+<!-- ===== MAIN CANVAS ===== -->
+<div class="canvas">
+
+  <!-- ===== EXTERNAL USERS & INGRESS ===== -->
+  <div class="section-title">External Traffic & Ingress</div>
+  <div class="grid-4 mb-12">
+    <!-- Users -->
+    <div class="resource">
+      <div class="resource-icon" style="background:#E8F4FD">
+        <svg viewBox="0 0 32 32"><circle cx="16" cy="11" r="5" fill="#0078D4"/><path d="M6 28c0-5.5 4.5-10 10-10s10 4.5 10 10" fill="#0078D4" opacity="0.6"/></svg>
+      </div>
+      <div class="resource-name">End Users</div>
+      <div class="resource-detail">Analysts, Compliance Officers</div>
+    </div>
+
+    <!-- Azure Front Door -->
+    <div class="resource">
+      <div class="resource-icon" style="background:#E8F4FD">
+        <svg viewBox="0 0 32 32"><rect x="4" y="8" width="24" height="16" rx="3" fill="#0078D4"/><path d="M10 16h12M16 12v8" stroke="white" stroke-width="2"/></svg>
+      </div>
+      <div class="resource-name">Azure Front Door</div>
+      <div class="resource-detail">WAF + CDN + SSL Termination</div>
+      <span class="resource-badge badge-managed">Managed</span>
+    </div>
+
+    <!-- Azure API Management -->
+    <div class="resource">
+      <div class="resource-icon" style="background:#E8F4FD">
+        <svg viewBox="0 0 32 32"><rect x="5" y="6" width="22" height="20" rx="2" fill="#0078D4"/><path d="M9 12h14M9 16h14M9 20h10" stroke="white" stroke-width="1.5"/></svg>
+      </div>
+      <div class="resource-name">API Management</div>
+      <div class="resource-detail">Rate limiting, Auth, Routing</div>
+      <span class="resource-badge badge-managed">Managed</span>
+    </div>
+
+    <!-- Azure AD -->
+    <div class="resource">
+      <div class="resource-icon" style="background:#FFF3E0">
+        <svg viewBox="0 0 32 32"><path d="M16 4L4 16l12 12 12-12L16 4z" fill="#FF8C00"/><circle cx="16" cy="14" r="3" fill="white"/><path d="M11 22c0-2.8 2.2-5 5-5s5 2.2 5 5" fill="white"/></svg>
+      </div>
+      <div class="resource-name">Microsoft Entra ID</div>
+      <div class="resource-detail">OAuth 2.0 / RBAC / JWT</div>
+      <span class="resource-badge badge-managed">Managed</span>
+    </div>
+  </div>
+
+  <!-- ===== MAIN VNET ===== -->
+  <div class="vnet">
+    <div class="vnet-label">
+      <svg viewBox="0 0 16 16" width="14" height="14" style="vertical-align:middle;margin-right:4px"><rect x="1" y="1" width="14" height="14" rx="2" fill="none" stroke="#0078D4" stroke-width="1.5"/><path d="M4 8h8M8 4v8" stroke="#0078D4" stroke-width="1.5"/></svg>
+      Azure VNet — idp-rag-vnet (10.0.0.0/16)
+    </div>
+
+    <!-- ===== INGRESS SUBNET ===== -->
+    <div class="subnet">
+      <div class="subnet-label">Application Gateway Subnet <span class="subnet-cidr">10.0.0.0/24</span></div>
+      <div class="grid-3 mt-16">
+        <div class="resource">
+          <div class="resource-icon" style="background:#E8F4FD">
+            <svg viewBox="0 0 32 32"><rect x="3" y="10" width="26" height="12" rx="3" fill="#0078D4"/><circle cx="10" cy="16" r="2" fill="white"/><circle cx="16" cy="16" r="2" fill="white"/><circle cx="22" cy="16" r="2" fill="white"/></svg>
+          </div>
+          <div class="resource-name">Application Gateway v2</div>
+          <div class="resource-detail">L7 Load Balancer + WAF v2<br/>Path-based routing to AKS</div>
+        </div>
+        <div class="resource">
+          <div class="resource-icon" style="background:#E8F4FD">
+            <svg viewBox="0 0 32 32"><rect x="6" y="6" width="20" height="20" rx="3" fill="#0078D4" opacity="0.2"/><rect x="8" y="8" width="16" height="16" rx="2" fill="#0078D4"/><path d="M12 16h8M16 12v8" stroke="white" stroke-width="2"/></svg>
+          </div>
+          <div class="resource-name">Azure DNS Private Zone</div>
+          <div class="resource-detail">*.idp-rag.internal</div>
+        </div>
+        <div class="resource">
+          <div class="resource-icon" style="background:#FCE4EC">
+            <svg viewBox="0 0 32 32"><path d="M16 3L4 9v14l12 6 12-6V9L16 3z" fill="#D13438" opacity="0.2"/><path d="M16 3L4 9v14l12 6 12-6V9L16 3z" fill="none" stroke="#D13438" stroke-width="1.5"/><path d="M12 14l3 3 5-6" stroke="#D13438" stroke-width="2" fill="none"/></svg>
+          </div>
+          <div class="resource-name">NSG / Network Policy</div>
+          <div class="resource-detail">East-West + North-South rules</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== AKS — AGENT CLUSTER ===== -->
+    <div class="subnet" style="margin-top:20px">
+      <div class="subnet-label">AKS Agent Subnet <span class="subnet-cidr">10.0.1.0/22</span></div>
+
+      <div class="section-title mt-16">AKS Cluster — Agent Runtime (idp-rag-agents-aks)</div>
+
+      <!-- CORE AGENTS ROW -->
+      <div style="margin-bottom:8px; font-size:12px; font-weight:600; color:var(--azure-dark);">Core Agents — Independent Pod Deployments (KEDA auto-scaled)</div>
+      <div class="grid-4">
+        <div class="resource">
+          <span class="resource-badge badge-keda">KEDA</span>
+          <div class="resource-icon" style="background:#EDE7F6">
+            <svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="11" fill="#8661C5" opacity="0.15"/><path d="M11 16l3 3 7-7" stroke="#8661C5" stroke-width="2.5" fill="none"/><circle cx="16" cy="16" r="11" fill="none" stroke="#8661C5" stroke-width="1.5"/></svg>
+          </div>
+          <div class="resource-name">Orchestrator Agent</div>
+          <div class="resource-detail">ReAct loop · Plan → Retrieve → Synthesise → Verify</div>
+          <span class="tier-label tier-1">Tier-1 GPT-4o / Opus</span>
+        </div>
+
+        <div class="resource">
+          <span class="resource-badge badge-keda">KEDA</span>
+          <div class="resource-icon" style="background:#EDE7F6">
+            <svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="11" fill="#8661C5" opacity="0.15"/><path d="M10 12h12M10 16h8M10 20h10" stroke="#8661C5" stroke-width="2" stroke-linecap="round"/></svg>
+          </div>
+          <div class="resource-name">Router Agent</div>
+          <div class="resource-detail">Intent classification<br/>Query decomposition</div>
+          <span class="tier-label tier-local">Deterministic + SLM</span>
+        </div>
+
+        <div class="resource">
+          <span class="resource-badge badge-keda">KEDA</span>
+          <div class="resource-icon" style="background:#EDE7F6">
+            <svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="11" fill="#8661C5" opacity="0.15"/><circle cx="12" cy="13" r="3" fill="none" stroke="#8661C5" stroke-width="1.5"/><circle cx="20" cy="13" r="3" fill="none" stroke="#8661C5" stroke-width="1.5"/><path d="M8 22h16" stroke="#8661C5" stroke-width="1.5"/></svg>
+          </div>
+          <div class="resource-name">Retriever Agent</div>
+          <div class="resource-detail">Locate → Expand → Select → Rerank</div>
+          <span class="tier-label tier-local">Deterministic</span>
+        </div>
+
+        <div class="resource">
+          <span class="resource-badge badge-keda">KEDA</span>
+          <div class="resource-icon" style="background:#EDE7F6">
+            <svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="11" fill="#8661C5" opacity="0.15"/><path d="M10 11h12v10H10z" fill="none" stroke="#8661C5" stroke-width="1.5"/><path d="M13 15h6M13 18h4" stroke="#8661C5" stroke-width="1.5"/></svg>
+          </div>
+          <div class="resource-name">Synthesiser Agent</div>
+          <div class="resource-detail">Evidence-grounded answer generation</div>
+          <span class="tier-label tier-2">Tier-2 GPT-4o-mini / Sonnet</span>
+        </div>
+      </div>
+
+      <div class="grid-5 mt-16">
+        <div class="resource">
+          <span class="resource-badge badge-keda">KEDA</span>
+          <div class="resource-icon" style="background:#EDE7F6">
+            <svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="11" fill="#8661C5" opacity="0.15"/><path d="M12 14l3 3 5-6" stroke="#8661C5" stroke-width="2.5" fill="none"/><path d="M16 22v2M12 22v2M20 22v2" stroke="#8661C5" stroke-width="1.5"/></svg>
+          </div>
+          <div class="resource-name">Verifier Agent</div>
+          <div class="resource-detail">Per-claim citation check</div>
+          <span class="tier-label tier-local">Deterministic + SLM</span>
+        </div>
+
+        <div class="resource">
+          <span class="resource-badge badge-keda">KEDA</span>
+          <div class="resource-icon" style="background:#EDE7F6">
+            <svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="11" fill="#8661C5" opacity="0.15"/><rect x="10" y="10" width="12" height="12" rx="2" fill="none" stroke="#8661C5" stroke-width="1.5"/><path d="M14 14h4M14 17h2" stroke="#8661C5" stroke-width="1.5"/></svg>
+          </div>
+          <div class="resource-name">Extractor Agent</div>
+          <div class="resource-detail">Schema-driven field extraction</div>
+          <span class="tier-label tier-2">Tier-2</span>
+        </div>
+
+        <div class="resource">
+          <span class="resource-badge badge-keda">KEDA</span>
+          <div class="resource-icon" style="background:#EDE7F6">
+            <svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="11" fill="#8661C5" opacity="0.15"/><path d="M10 16h4l2-4 2 8 2-4h4" stroke="#8661C5" stroke-width="1.5" fill="none"/></svg>
+          </div>
+          <div class="resource-name">Transformer Agent</div>
+          <div class="resource-detail">Value normalization via MCP</div>
+          <span class="tier-label tier-local">Deterministic + MCP</span>
+        </div>
+
+        <div class="resource">
+          <span class="resource-badge badge-keda">KEDA</span>
+          <div class="resource-icon" style="background:#EDE7F6">
+            <svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="11" fill="#8661C5" opacity="0.15"/><path d="M12 10h8v4H12zM10 18h12v4H10z" fill="none" stroke="#8661C5" stroke-width="1.5"/><path d="M16 14v4" stroke="#8661C5" stroke-width="1.5"/></svg>
+          </div>
+          <div class="resource-name">Classifier Agent</div>
+          <div class="resource-detail">Document type classification</div>
+          <span class="tier-label tier-local">Deterministic</span>
+        </div>
+
+        <div class="resource">
+          <span class="resource-badge badge-keda">KEDA</span>
+          <div class="resource-icon" style="background:#EDE7F6">
+            <svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="11" fill="#8661C5" opacity="0.15"/><path d="M16 8v6l4 3" stroke="#8661C5" stroke-width="1.5" fill="none" stroke-linecap="round"/><circle cx="16" cy="16" r="7" fill="none" stroke="#8661C5" stroke-width="1.5"/></svg>
+          </div>
+          <div class="resource-name">Preprocessor Agent</div>
+          <div class="resource-detail">Page triage + canonicalization</div>
+          <span class="tier-label tier-local">Deterministic</span>
+        </div>
+      </div>
+
+      <!-- PLATFORM SERVICES ROW -->
+      <div class="divider"></div>
+      <div style="margin-bottom:8px; font-size:12px; font-weight:600; color:var(--azure-dark);">Platform Services (Sidecar Pods)</div>
+      <div class="grid-5">
+        <div class="resource">
+          <div class="resource-icon" style="background:#E8F4FD">
+            <svg viewBox="0 0 32 32"><rect x="6" y="6" width="20" height="20" rx="3" fill="#0078D4"/><path d="M11 13h10M11 16h10M11 19h6" stroke="white" stroke-width="1.5"/></svg>
+          </div>
+          <div class="resource-name">Model Gateway</div>
+          <div class="resource-detail">Circuit breaker · Rate limit<br/>Cost tracking · Audit log</div>
+        </div>
+
+        <div class="resource">
+          <div class="resource-icon" style="background:#E8F4FD">
+            <svg viewBox="0 0 32 32"><rect x="5" y="8" width="22" height="16" rx="2" fill="#0078D4"/><path d="M12 14h8M12 18h5" stroke="white" stroke-width="1.5"/><circle cx="9" cy="14" r="1.5" fill="white"/></svg>
+          </div>
+          <div class="resource-name">Prompt Registry</div>
+          <div class="resource-detail">Versioned templates<br/>Content-hash keyed</div>
+        </div>
+
+        <div class="resource">
+          <div class="resource-icon" style="background:#FFF3E0">
+            <svg viewBox="0 0 32 32"><path d="M6 8h20v16H6z" fill="#FF8C00" opacity="0.15" rx="2"/><path d="M6 8h20v16H6z" fill="none" stroke="#FF8C00" stroke-width="1.5" rx="2"/><path d="M6 14h20" stroke="#FF8C00" stroke-width="1"/><path d="M11 8v16M17 8v16" stroke="#FF8C00" stroke-width="1"/></svg>
+          </div>
+          <div class="resource-name">MCP Reference Server</div>
+          <div class="resource-detail">Reference data normalization<br/>Lookup service</div>
+          <span class="resource-badge badge-oss">OSS</span>
+        </div>
+
+        <div class="resource">
+          <div class="resource-icon" style="background:#E8F4FD">
+            <svg viewBox="0 0 32 32"><path d="M8 6h16v20H8z" fill="#0078D4" opacity="0.15"/><path d="M8 6h16v20H8z" fill="none" stroke="#0078D4" stroke-width="1.5"/><path d="M12 12h8M12 16h8M12 20h5" stroke="#0078D4" stroke-width="1.2"/></svg>
+          </div>
+          <div class="resource-name">Agent Eval Runner</div>
+          <div class="resource-detail">Evaluation harness<br/>Quality metrics</div>
+        </div>
+
+        <div class="resource">
+          <div class="resource-icon" style="background:#E8F4FD">
+            <svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="10" fill="#0078D4" opacity="0.15"/><path d="M16 6A10 10 0 0116 26" fill="none" stroke="#0078D4" stroke-width="2"/><path d="M16 10A6 6 0 0116 22" fill="none" stroke="#0078D4" stroke-width="2" opacity="0.5"/></svg>
+          </div>
+          <div class="resource-name">Feedback Pipeline</div>
+          <div class="resource-detail">Ingest → Attribute → Train<br/>Boundary-safe retraining</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== AKS — UI + INGESTION CLUSTER ===== -->
+    <div class="subnet" style="margin-top:20px">
+      <div class="subnet-label">AKS Application Subnet <span class="subnet-cidr">10.0.4.0/22</span></div>
+
+      <div class="section-title mt-16">AKS Cluster — Application & Ingestion (idp-rag-app-aks)</div>
+
+      <div class="grid-4">
+        <div class="resource">
+          <span class="resource-badge badge-keda">KEDA</span>
+          <div class="resource-icon" style="background:#FCE4EC">
+            <svg viewBox="0 0 32 32"><rect x="4" y="6" width="24" height="20" rx="3" fill="#D13438" opacity="0.15"/><rect x="4" y="6" width="24" height="20" rx="3" fill="none" stroke="#D13438" stroke-width="1.5"/><circle cx="10" cy="12" r="2" fill="#D13438"/><path d="M8 20h16" stroke="#D13438" stroke-width="1.5"/></svg>
+          </div>
+          <div class="resource-name">Streamlit UI</div>
+          <div class="resource-detail">app/app.py<br/>PDF viewer + Chat</div>
+        </div>
+
+        <div class="resource">
+          <span class="resource-badge badge-keda">KEDA</span>
+          <div class="resource-icon" style="background:#E8F5E9">
+            <svg viewBox="0 0 32 32"><rect x="5" y="5" width="22" height="22" rx="3" fill="#107C10" opacity="0.15"/><path d="M10 16l3 3 7-7" stroke="#107C10" stroke-width="2.5" fill="none"/></svg>
+          </div>
+          <div class="resource-name">Ingestion Pipeline</div>
+          <div class="resource-detail">Multi-format parser<br/>PDF / DOCX / Excel / CSV</div>
+        </div>
+
+        <div class="resource">
+          <div class="resource-icon" style="background:#E8F5E9">
+            <svg viewBox="0 0 32 32"><rect x="6" y="8" width="20" height="16" rx="2" fill="#107C10" opacity="0.15"/><path d="M6 14h20M14 8v16" stroke="#107C10" stroke-width="1.5"/></svg>
+          </div>
+          <div class="resource-name">Late Chunking Engine</div>
+          <div class="resource-detail">Macro ≤ 8192 tokens<br/>Child spans ~256 tokens</div>
+        </div>
+
+        <div class="resource">
+          <div class="resource-icon" style="background:#E8F5E9">
+            <svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="10" fill="#107C10" opacity="0.15"/><path d="M12 12h8v8h-8z" fill="none" stroke="#107C10" stroke-width="1.5"/><path d="M16 8v4M16 20v4M8 16h4M20 16h4" stroke="#107C10" stroke-width="1.5"/></svg>
+          </div>
+          <div class="resource-name">ModernBERT Embedder</div>
+          <div class="resource-detail">nomic-ai/modernbert-embed-base<br/>768-dim · CPU inference</div>
+          <span class="tier-label tier-local">Local Model</span>
+        </div>
+      </div>
+
+      <div class="grid-3 mt-16">
+        <div class="resource">
+          <div class="resource-icon" style="background:#E8F4FD">
+            <svg viewBox="0 0 32 32"><path d="M8 10h16l-2 14H10L8 10z" fill="#0078D4" opacity="0.15"/><path d="M8 10h16l-2 14H10L8 10z" fill="none" stroke="#0078D4" stroke-width="1.5"/><path d="M6 10h20" stroke="#0078D4" stroke-width="2"/></svg>
+          </div>
+          <div class="resource-name">Hybrid Retrieval</div>
+          <div class="resource-detail">Vector search + BM25 fusion<br/>Cross-encoder reranking</div>
+        </div>
+
+        <div class="resource">
+          <div class="resource-icon" style="background:#E8F4FD">
+            <svg viewBox="0 0 32 32"><rect x="6" y="8" width="20" height="16" rx="2" fill="#0078D4" opacity="0.15"/><path d="M10 14h12M10 18h8" stroke="#0078D4" stroke-width="1.5"/><circle cx="22" cy="20" r="3" fill="#0078D4"/></svg>
+          </div>
+          <div class="resource-name">Grounding Service</div>
+          <div class="resource-detail">PDF highlight annotations<br/>Page coordinate mapping</div>
+        </div>
+
+        <div class="resource">
+          <div class="resource-icon" style="background:#E8F4FD">
+            <svg viewBox="0 0 32 32"><rect x="7" y="7" width="18" height="18" rx="2" fill="#0078D4" opacity="0.15"/><path d="M11 12h3v8h-3zM15 9h3v11h-3zM19 14h3v6h-3z" fill="#0078D4"/></svg>
+          </div>
+          <div class="resource-name">Intent-Based Router</div>
+          <div class="resource-detail">location · coverage · semantic<br/>comparison · multi_hop · aggregation</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== DATA SUBNET ===== -->
+    <div class="subnet" style="margin-top:20px">
+      <div class="subnet-label">Data Subnet <span class="subnet-cidr">10.0.8.0/24</span></div>
+
+      <div class="section-title mt-16">Databases & State Stores</div>
+
+      <div class="grid-4">
+        <!-- PostgreSQL + pgvector -->
+        <div class="resource" style="border-left:3px solid #0078D4">
+          <span class="resource-badge badge-managed">Managed</span>
+          <div class="resource-icon" style="background:#E8F4FD">
+            <svg viewBox="0 0 32 32"><ellipse cx="16" cy="10" rx="10" ry="4" fill="#0078D4"/><path d="M6 10v12c0 2.2 4.5 4 10 4s10-1.8 10-4V10" fill="none" stroke="#0078D4" stroke-width="1.5"/><path d="M6 16c0 2.2 4.5 4 10 4s10-1.8 10-4" fill="none" stroke="#0078D4" stroke-width="1"/><path d="M6 22c0 2.2 4.5 4 10 4s10-1.8 10-4" fill="none" stroke="#0078D4" stroke-width="1" opacity="0.5"/></svg>
+          </div>
+          <div class="resource-name">Azure Database for PostgreSQL</div>
+          <div class="resource-detail">Flexible Server · v14<br/>HA Zone-Redundant</div>
+        </div>
+
+        <!-- pgvector -->
+        <div class="resource" style="border-left:3px solid #107C10">
+          <div class="resource-icon" style="background:#E8F5E9">
+            <svg viewBox="0 0 32 32"><circle cx="11" cy="11" r="4" fill="#107C10" opacity="0.3"/><circle cx="21" cy="11" r="4" fill="#107C10" opacity="0.3"/><circle cx="16" cy="20" r="4" fill="#107C10" opacity="0.3"/><path d="M11 11L21 11M11 11L16 20M21 11L16 20" stroke="#107C10" stroke-width="1.2"/></svg>
+          </div>
+          <div class="resource-name">pgvector Extension</div>
+          <div class="resource-detail">HNSW index · vector(768)<br/>Cosine similarity search</div>
+        </div>
+
+        <!-- Redis -->
+        <div class="resource" style="border-left:3px solid #D13438">
+          <span class="resource-badge badge-managed">Managed</span>
+          <div class="resource-icon" style="background:#FCE4EC">
+            <svg viewBox="0 0 32 32"><path d="M16 6l10 5v10l-10 5-10-5V11l10-5z" fill="#D13438" opacity="0.15"/><path d="M16 6l10 5v10l-10 5-10-5V11l10-5z" fill="none" stroke="#D13438" stroke-width="1.5"/><path d="M6 11l10 5 10-5M16 16v10" stroke="#D13438" stroke-width="1"/></svg>
+          </div>
+          <div class="resource-name">Azure Cache for Redis</div>
+          <div class="resource-detail">Premium tier · Clustered<br/>BM25 cache · Session state</div>
+        </div>
+
+        <!-- Blob Storage -->
+        <div class="resource" style="border-left:3px solid #0078D4">
+          <span class="resource-badge badge-managed">Managed</span>
+          <div class="resource-icon" style="background:#E8F4FD">
+            <svg viewBox="0 0 32 32"><rect x="6" y="10" width="20" height="14" rx="2" fill="#0078D4" opacity="0.15"/><rect x="6" y="10" width="20" height="14" rx="2" fill="none" stroke="#0078D4" stroke-width="1.5"/><path d="M12 6h8v4H12z" fill="#0078D4" opacity="0.3"/><path d="M12 6h8v4H12z" fill="none" stroke="#0078D4" stroke-width="1.5"/></svg>
+          </div>
+          <div class="resource-name">Azure Blob Storage</div>
+          <div class="resource-detail">PDF / DOCX / Excel source docs<br/>Immutable audit archive</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== MESSAGING SUBNET ===== -->
+    <div class="subnet" style="margin-top:20px">
+      <div class="subnet-label">Messaging & Events Subnet <span class="subnet-cidr">10.0.9.0/24</span></div>
+
+      <div class="section-title mt-16">Event Streaming & Message Bus</div>
+
+      <div class="grid-4">
+        <div class="resource" style="border-left:3px solid #FF8C00">
+          <span class="resource-badge badge-managed">Managed</span>
+          <div class="resource-icon" style="background:#FFF3E0">
+            <svg viewBox="0 0 32 32"><rect x="4" y="8" width="24" height="6" rx="2" fill="#FF8C00"/><rect x="4" y="18" width="24" height="6" rx="2" fill="#FF8C00" opacity="0.6"/><path d="M16 14v4" stroke="#FF8C00" stroke-width="2"/></svg>
+          </div>
+          <div class="resource-name">Azure Event Hubs<br/>(Kafka Protocol)</div>
+          <div class="resource-detail">Agent message bus · Audit events<br/>Partitioned by doc_id</div>
+        </div>
+
+        <div class="resource">
+          <div class="resource-icon" style="background:#FFF3E0">
+            <svg viewBox="0 0 32 32"><path d="M6 10h20v4H6zM6 18h20v4H6z" fill="#FF8C00" opacity="0.3"/><path d="M6 10h20v4H6zM6 18h20v4H6z" fill="none" stroke="#FF8C00" stroke-width="1.5"/><path d="M10 14v4M16 14v4M22 14v4" stroke="#FF8C00" stroke-width="1.2"/></svg>
+          </div>
+          <div class="resource-name">Kafka Topics</div>
+          <div class="resource-detail">agent.messages · audit.events<br/>ingestion.jobs · feedback.events</div>
+        </div>
+
+        <div class="resource" style="border-left:3px solid #107C10">
+          <span class="resource-badge badge-keda">KEDA</span>
+          <div class="resource-icon" style="background:#E8F5E9">
+            <svg viewBox="0 0 32 32"><path d="M8 20V12l8-6 8 6v8l-8 6-8-6z" fill="#107C10" opacity="0.15"/><path d="M8 20V12l8-6 8 6v8l-8 6-8-6z" fill="none" stroke="#107C10" stroke-width="1.5"/><path d="M12 16h8M16 12v8" stroke="#107C10" stroke-width="1.5"/></svg>
+          </div>
+          <div class="resource-name">KEDA Scaler</div>
+          <div class="resource-detail">Kafka consumer lag trigger<br/>0 → N pod autoscaling</div>
+        </div>
+
+        <div class="resource">
+          <div class="resource-icon" style="background:#FFF3E0">
+            <svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="10" fill="#FF8C00" opacity="0.15"/><path d="M16 9v7l5 3" stroke="#FF8C00" stroke-width="2" fill="none" stroke-linecap="round"/><circle cx="16" cy="16" r="10" fill="none" stroke="#FF8C00" stroke-width="1.5"/></svg>
+          </div>
+          <div class="resource-name">Kafka Resilience</div>
+          <div class="resource-detail">DLQ · Retry policies<br/>Consumer group management</div>
+          <span class="resource-badge badge-oss">OSS</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== OBSERVABILITY SUBNET ===== -->
+    <div class="subnet" style="margin-top:20px">
+      <div class="subnet-label">Observability Subnet <span class="subnet-cidr">10.0.10.0/24</span></div>
+
+      <div class="section-title mt-16">Monitoring, Tracing & Audit</div>
+
+      <div class="grid-5">
+        <div class="resource" style="border-left:3px solid #8661C5">
+          <div class="resource-icon" style="background:#EDE7F6">
+            <svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="10" fill="#8661C5" opacity="0.15"/><circle cx="16" cy="16" r="4" fill="#8661C5" opacity="0.4"/><circle cx="16" cy="16" r="7" fill="none" stroke="#8661C5" stroke-width="1.5" stroke-dasharray="3 2"/><circle cx="16" cy="16" r="10" fill="none" stroke="#8661C5" stroke-width="1.5"/></svg>
+          </div>
+          <div class="resource-name">OpenTelemetry Collector</div>
+          <div class="resource-detail">Traces · Metrics · Logs<br/>OTLP gRPC receiver</div>
+          <span class="resource-badge badge-oss">OSS</span>
+        </div>
+
+        <div class="resource" style="border-left:3px solid #0078D4">
+          <span class="resource-badge badge-managed">Managed</span>
+          <div class="resource-icon" style="background:#E8F4FD">
+            <svg viewBox="0 0 32 32"><rect x="5" y="8" width="22" height="16" rx="2" fill="#0078D4" opacity="0.15"/><path d="M9 18l4-4 3 2 4-5 3 3" stroke="#0078D4" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+          </div>
+          <div class="resource-name">Azure Monitor</div>
+          <div class="resource-detail">Application Insights<br/>Log Analytics workspace</div>
+        </div>
+
+        <div class="resource">
+          <div class="resource-icon" style="background:#FFF3E0">
+            <svg viewBox="0 0 32 32"><rect x="5" y="6" width="22" height="20" rx="2" fill="#FF8C00" opacity="0.15"/><path d="M9 14h14M9 18h10M9 10h14" stroke="#FF8C00" stroke-width="1.5"/></svg>
+          </div>
+          <div class="resource-name">Grafana Dashboard</div>
+          <div class="resource-detail">Agent latency · Token costs<br/>Circuit breaker status</div>
+          <span class="resource-badge badge-oss">OSS</span>
+        </div>
+
+        <div class="resource">
+          <div class="resource-icon" style="background:#FCE4EC">
+            <svg viewBox="0 0 32 32"><path d="M16 5l2 6h6l-5 4 2 6-5-4-5 4 2-6-5-4h6l2-6z" fill="#D13438" opacity="0.3"/><path d="M16 5l2 6h6l-5 4 2 6-5-4-5 4 2-6-5-4h6l2-6z" fill="none" stroke="#D13438" stroke-width="1.2"/></svg>
+          </div>
+          <div class="resource-name">Prometheus</div>
+          <div class="resource-detail">Kafka metrics exporter<br/>Custom agent metrics</div>
+          <span class="resource-badge badge-oss">OSS</span>
+        </div>
+
+        <div class="resource" style="border-left:3px solid #0078D4">
+          <span class="resource-badge badge-managed">Managed</span>
+          <div class="resource-icon" style="background:#E8F4FD">
+            <svg viewBox="0 0 32 32"><path d="M8 6h16v20H8z" fill="#0078D4" opacity="0.15"/><path d="M8 6h16v20H8z" fill="none" stroke="#0078D4" stroke-width="1.5"/><path d="M12 12h8M12 16h8M12 20h5" stroke="#0078D4" stroke-width="1.2"/><path d="M8 6h16" stroke="#0078D4" stroke-width="2"/></svg>
+          </div>
+          <div class="resource-name">Immutable Audit Log</div>
+          <div class="resource-detail">Append-only · Full prompt/response<br/>call_id · tokens · cost</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== MEMORY SUBNET ===== -->
+    <div class="subnet" style="margin-top:20px">
+      <div class="subnet-label">Agent Memory Subnet <span class="subnet-cidr">10.0.11.0/24</span></div>
+
+      <div class="section-title mt-16">Agent Memory System (§6)</div>
+
+      <div class="grid-4">
+        <div class="resource">
+          <div class="resource-icon" style="background:#EDE7F6">
+            <svg viewBox="0 0 32 32"><rect x="6" y="6" width="20" height="20" rx="4" fill="#8661C5" opacity="0.15"/><path d="M10 13h12M10 16h8M10 19h10" stroke="#8661C5" stroke-width="1.5"/></svg>
+          </div>
+          <div class="resource-name">Working Memory</div>
+          <div class="resource-detail">Per-query scratch space<br/>Token budget tracking</div>
+        </div>
+
+        <div class="resource">
+          <div class="resource-icon" style="background:#EDE7F6">
+            <svg viewBox="0 0 32 32"><path d="M8 8h16v16H8z" fill="#8661C5" opacity="0.15"/><path d="M12 12h8v8h-8z" fill="#8661C5" opacity="0.3"/><path d="M14 14h4v4h-4z" fill="#8661C5"/></svg>
+          </div>
+          <div class="resource-name">Episodic Memory</div>
+          <div class="resource-detail">Per-user-per-document<br/>Query history + fact cache</div>
+        </div>
+
+        <div class="resource">
+          <div class="resource-icon" style="background:#EDE7F6">
+            <svg viewBox="0 0 32 32"><circle cx="12" cy="12" r="4" fill="none" stroke="#8661C5" stroke-width="1.5"/><circle cx="22" cy="12" r="4" fill="none" stroke="#8661C5" stroke-width="1.5"/><circle cx="17" cy="21" r="4" fill="none" stroke="#8661C5" stroke-width="1.5"/><path d="M15 14l2 4M19 14l-2 4" stroke="#8661C5" stroke-width="1"/></svg>
+          </div>
+          <div class="resource-name">Semantic Memory</div>
+          <div class="resource-detail">Entity graph (Knowledge Graph)<br/>Entity mentions + aliases</div>
+        </div>
+
+        <div class="resource">
+          <div class="resource-icon" style="background:#EDE7F6">
+            <svg viewBox="0 0 32 32"><rect x="6" y="8" width="20" height="16" rx="2" fill="#8661C5" opacity="0.15"/><path d="M10 14h4v6h-4zM16 11h4v9h-4zM22 16h-1v4h2v-4z" fill="#8661C5"/></svg>
+          </div>
+          <div class="resource-name">Conversational Memory</div>
+          <div class="resource-detail">Multi-turn context<br/>Coreference resolution</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+  <!-- END VNET -->
+
+  <!-- ===== EXTERNAL AI SERVICES ===== -->
+  <div style="margin-top:24px">
+    <div class="section-title">External AI & Cognitive Services</div>
+    <div class="grid-5">
+      <div class="resource" style="border-left:3px solid #8661C5">
+        <div class="resource-icon" style="background:#EDE7F6">
+          <svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="10" fill="#8661C5" opacity="0.15"/><text x="16" y="20" text-anchor="middle" fill="#8661C5" font-size="12" font-weight="700">AI</text></svg>
+        </div>
+        <div class="resource-name">Azure OpenAI Service</div>
+        <div class="resource-detail">GPT-4o (Tier-1)<br/>GPT-4o-mini (Tier-2)</div>
+        <span class="tier-label tier-1">Tier-1 / Tier-2</span>
+      </div>
+
+      <div class="resource" style="border-left:3px solid #8661C5">
+        <div class="resource-icon" style="background:#EDE7F6">
+          <svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="10" fill="#8661C5" opacity="0.15"/><path d="M12 11l4 10 4-10" stroke="#8661C5" stroke-width="2.5" fill="none" stroke-linecap="round"/></svg>
+        </div>
+        <div class="resource-name">Anthropic Claude API</div>
+        <div class="resource-detail">Claude Opus (Tier-1)<br/>Claude Sonnet (Tier-2)</div>
+        <span class="tier-label tier-1">Tier-1 / Tier-2</span>
+      </div>
+
+      <div class="resource" style="border-left:3px solid #0078D4">
+        <span class="resource-badge badge-managed">Managed</span>
+        <div class="resource-icon" style="background:#E8F4FD">
+          <svg viewBox="0 0 32 32"><rect x="5" y="6" width="22" height="20" rx="2" fill="#0078D4" opacity="0.15"/><path d="M10 12h12M10 16h8M10 20h10" stroke="#0078D4" stroke-width="1.5"/><rect x="18" y="17" width="6" height="6" rx="1" fill="#0078D4"/></svg>
+        </div>
+        <div class="resource-name">Azure Document Intelligence</div>
+        <div class="resource-detail">Layout model<br/>Table + Form extraction</div>
+      </div>
+
+      <div class="resource" style="border-left:3px solid #0078D4">
+        <span class="resource-badge badge-managed">Managed</span>
+        <div class="resource-icon" style="background:#E8F4FD">
+          <svg viewBox="0 0 32 32"><path d="M16 4l10 6v12l-10 6-10-6V10l10-6z" fill="#0078D4" opacity="0.15"/><path d="M16 4l10 6v12l-10 6-10-6V10l10-6z" fill="none" stroke="#0078D4" stroke-width="1.5"/><path d="M16 10v12M10 13l6 3 6-3" stroke="#0078D4" stroke-width="1"/></svg>
+        </div>
+        <div class="resource-name">Azure Key Vault</div>
+        <div class="resource-detail">API keys · Connection strings<br/>Managed Identity access</div>
+      </div>
+
+      <div class="resource" style="border-left:3px solid #0078D4">
+        <span class="resource-badge badge-managed">Managed</span>
+        <div class="resource-icon" style="background:#E8F4FD">
+          <svg viewBox="0 0 32 32"><rect x="5" y="8" width="22" height="16" rx="2" fill="#0078D4" opacity="0.15"/><path d="M9 14h6v6H9z" fill="#0078D4" opacity="0.3"/><path d="M17 14h6v6h-6z" fill="#0078D4" opacity="0.5"/></svg>
+        </div>
+        <div class="resource-name">Azure Container Registry</div>
+        <div class="resource-detail">Agent container images<br/>Vulnerability scanning</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== DATA FLOW DIAGRAM ===== -->
+  <div class="flow-section">
+    <div class="section-title">Data Flow — Query Path</div>
+    <div class="flow-row">
+      <div class="flow-label">User Query</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-label" style="border-color:#0078D4">Front Door / APIM</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-label" style="border-color:#8661C5; color:#8661C5">Orchestrator Agent</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-label" style="border-color:#8661C5; color:#8661C5">Router Agent</div>
+      <div class="flow-desc">Intent classification via Kafka bus</div>
+    </div>
+    <div class="flow-row">
+      <div class="flow-label" style="border-color:#8661C5; color:#8661C5">Router Agent</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-label" style="border-color:#107C10; color:#107C10">Retriever Agent</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-label" style="border-color:#0078D4">PostgreSQL + pgvector</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-label" style="border-color:#D13438; color:#D13438">Redis Cache</div>
+      <div class="flow-desc">Hybrid vector + BM25 retrieval</div>
+    </div>
+    <div class="flow-row">
+      <div class="flow-label" style="border-color:#107C10; color:#107C10">Evidence Chunks</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-label" style="border-color:#8661C5; color:#8661C5">Synthesiser Agent</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-label" style="border-color:#8661C5; color:#8661C5">Verifier Agent</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-label" style="border-color:#107C10; color:#107C10">Cited Answer</div>
+      <div class="flow-desc">Evidence-only synthesis + verification</div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section-title">Data Flow — Ingestion Path</div>
+    <div class="flow-row">
+      <div class="flow-label">Document Upload</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-label" style="border-color:#0078D4">Blob Storage</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-label" style="border-color:#FF8C00; color:#FF8C00">Kafka: ingestion.jobs</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-label" style="border-color:#107C10; color:#107C10">Ingestion Pipeline</div>
+      <div class="flow-desc">Event-driven, KEDA scaled</div>
+    </div>
+    <div class="flow-row">
+      <div class="flow-label" style="border-color:#107C10; color:#107C10">Parser (PyMUPDF/DI)</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-label" style="border-color:#107C10; color:#107C10">Late Chunking</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-label" style="border-color:#107C10; color:#107C10">ModernBERT Embed</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-label" style="border-color:#0078D4">PostgreSQL + pgvector</div>
+      <div class="flow-desc">Deterministic lineage preserved</div>
+    </div>
+  </div>
+
+  <!-- ===== SCALING & HA NOTES ===== -->
+  <div style="margin-top:20px; display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px;">
+    <div style="background:#F0F8FF; border:1px solid #B4D6FA; border-radius:8px; padding:16px;">
+      <div style="font-size:13px; font-weight:600; color:var(--azure-dark); margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+        <svg viewBox="0 0 16 16" width="16" height="16"><path d="M8 2l6 4v4l-6 4-6-4V6l6-4z" fill="#0078D4" opacity="0.2"/><path d="M8 2l6 4v4l-6 4-6-4V6l6-4z" fill="none" stroke="#0078D4" stroke-width="1"/></svg>
+        KEDA Autoscaling Strategy
+      </div>
+      <div style="font-size:11px; color:var(--azure-text-secondary); line-height:1.6;">
+        <div><strong>Orchestrator:</strong> Scale on active query count</div>
+        <div><strong>Synthesiser:</strong> Scale on Kafka consumer lag</div>
+        <div><strong>Ingestion:</strong> Scale on blob upload events</div>
+        <div><strong>All Agents:</strong> Scale-to-zero when idle</div>
+        <div><strong>Min/Max:</strong> 0–20 replicas per agent</div>
+      </div>
+    </div>
+
+    <div style="background:#FFF8F0; border:1px solid #FFD4A8; border-radius:8px; padding:16px;">
+      <div style="font-size:13px; font-weight:600; color:#E65100; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+        <svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="6" fill="#FF8C00" opacity="0.2"/><path d="M8 5v4M8 11v0.5" stroke="#FF8C00" stroke-width="1.5" stroke-linecap="round"/></svg>
+        High Availability
+      </div>
+      <div style="font-size:11px; color:var(--azure-text-secondary); line-height:1.6;">
+        <div><strong>PostgreSQL:</strong> Zone-redundant HA</div>
+        <div><strong>Redis:</strong> Premium with replicas</div>
+        <div><strong>AKS:</strong> Multi-AZ node pools</div>
+        <div><strong>Kafka:</strong> 3 partitions, replication=3</div>
+        <div><strong>Blob:</strong> ZRS (Zone-Redundant Storage)</div>
+      </div>
+    </div>
+
+    <div style="background:#F5F0FF; border:1px solid #C5B4E8; border-radius:8px; padding:16px;">
+      <div style="font-size:13px; font-weight:600; color:#5E35B1; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+        <svg viewBox="0 0 16 16" width="16" height="16"><rect x="2" y="2" width="12" height="12" rx="2" fill="#8661C5" opacity="0.2"/><path d="M5 8h6M8 5v6" stroke="#8661C5" stroke-width="1.5"/></svg>
+        Network Security
+      </div>
+      <div style="font-size:11px; color:var(--azure-text-secondary); line-height:1.6;">
+        <div><strong>Private Endpoints:</strong> All PaaS services</div>
+        <div><strong>NSGs:</strong> East-West micro-segmentation</div>
+        <div><strong>mTLS:</strong> Service mesh (Istio/Linkerd)</div>
+        <div><strong>Key Vault:</strong> Managed Identity only</div>
+        <div><strong>RBAC:</strong> Entra ID + document-level ACLs</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+<!-- END CANVAS -->
+
+<!-- ===== FOOTER ===== -->
+<div class="footer">
+  <div>Enterprise Agentic IDP RAG Platform · Azure Deployment Architecture v2.0</div>
+  <div>MASTER_PROMPT §2–§8 Compliant · Late Chunking (§2.2) · Evidence-Only Synthesis (§2.3) · Immutable Audit (§2.4)</div>
+  <div>Generated: March 2026</div>
+</div>
+
+</body>
+</html>

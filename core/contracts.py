@@ -1,5 +1,56 @@
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Dict, List, Optional
+
+
+# ── Canonical State Enums ────────────────────────────────────────────
+
+
+class DocumentLifecycle(str, Enum):
+    """Canonical document lifecycle states.
+
+    Tracks a document from initial ingestion through classification,
+    extraction, and verification to a fully processed state.
+    """
+    PENDING = "pending"              # Uploaded but not yet ingested
+    INGESTING = "ingesting"          # Page triage + canonicalization in progress
+    INGESTED = "ingested"            # Pages and chunks stored; awaiting classification
+    CLASSIFYING = "classifying"      # Classifier agent running
+    CLASSIFIED = "classified"        # document_type + classification_label assigned
+    EXTRACTING = "extracting"        # Extractor agent running
+    EXTRACTED = "extracted"          # Fields extracted; awaiting transformation
+    TRANSFORMING = "transforming"    # Transformer agent normalizing values
+    COMPLETE = "complete"            # Fully processed and queryable
+    ERROR = "error"                  # Processing failed; requires remediation
+
+
+class QueryState(str, Enum):
+    """Canonical query lifecycle states.
+
+    Tracks a query through the orchestrator ReAct loop from receipt
+    through routing, retrieval, synthesis, and verification.
+    """
+    RECEIVED = "received"            # Query received; awaiting routing
+    ROUTING = "routing"              # Router agent classifying intent
+    RETRIEVING = "retrieving"        # Retriever agent searching evidence
+    SYNTHESIZING = "synthesizing"    # Synthesiser agent generating answer
+    VERIFYING = "verifying"          # Verifier agent checking claims
+    COMPLETE = "complete"            # Answer delivered to user
+    ERROR = "error"                  # Query processing failed
+
+
+class FeedbackState(str, Enum):
+    """Canonical feedback event states.
+
+    Tracks feedback from ingestion through attribution, training row
+    generation, and retraining orchestration.
+    """
+    INGESTED = "ingested"            # Raw feedback stored
+    QUARANTINED = "quarantined"      # No prediction trace found; non-trainable
+    ATTRIBUTED = "attributed"        # Impacted layers identified
+    TRAINING_ROWS_BUILT = "training_rows_built"  # Training rows generated
+    SUBMITTED = "submitted"          # Rows submitted to retraining orchestrator
+    TRAINED = "trained"              # Retraining completed using this feedback
 
 
 @dataclass(frozen=True)
@@ -59,6 +110,8 @@ class RetrievedChunk:
     score: float
     heading_path: str
     section_id: str
+    document_type: Optional[str] = None
+    classification_label: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -67,6 +120,8 @@ class DocumentRecord:
     filename: str
     sha256: str
     page_count: int
+    document_type: Optional[str] = None
+    classification_label: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -97,6 +152,8 @@ class ChunkRecord:
     embedding: List[float]
     heading_path: str
     section_id: str
+    document_type: Optional[str] = None
+    classification_label: Optional[str] = None
 
 
 @dataclass(frozen=True)

@@ -3,6 +3,7 @@ from typing import List, Optional
 
 from openai import OpenAI
 
+from core.chunk_utils import format_sources
 from core.contracts import RetrievedChunk
 from typing import Tuple
 
@@ -16,7 +17,7 @@ def synthesize_answer(question: str, chunks: List[RetrievedChunk]) -> str:
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is required for synthesis.")
     client = OpenAI(api_key=api_key)
-    sources = _format_sources(chunks)
+    sources = format_sources(chunks)
     response = client.chat.completions.create(
         model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
         messages=[
@@ -85,7 +86,7 @@ def synthesize_coverage_attribute(
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is required for synthesis.")
     client = OpenAI(api_key=api_key)
-    sources = _format_sources(chunks)
+    sources = format_sources(chunks)
     response = client.chat.completions.create(
         model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
         messages=[
@@ -101,13 +102,6 @@ def synthesize_coverage_attribute(
     )
     answer = response.choices[0].message.content.strip()
     return answer, "llm"
-
-
-def _format_sources(chunks: List[RetrievedChunk]) -> str:
-    lines: List[str] = []
-    for idx, chunk in enumerate(chunks, start=1):
-        lines.append(f"[C{idx}] {chunk.text_content}")
-    return "\n".join(lines)
 
 
 def _format_sources_with_ids(chunks: List[RetrievedChunk]) -> str:
